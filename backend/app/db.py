@@ -105,12 +105,20 @@ class DatabaseClient:
             try:
                 from supabase import create_client
 
-                self._supabase = create_client(
+                client = create_client(
                     self.settings.supabase_url, self.settings.supabase_key
                 )
+                # Verify connectivity and that the 5 tables exist in Supabase
+                client.table("wallets").select("id").limit(1).execute()
+                self._supabase = client
                 self._mode = "supabase"
+                print("[FinSec DB] Connected to Supabase PostgreSQL successfully.")
             except Exception as exc:
-                print(f"[FinSec DB] Failed to initialize Supabase, falling back to SQLite: {exc}")
+                print(
+                    "[FinSec DB] Supabase not ready (run backend/sql/schema.sql in Supabase SQL Editor). "
+                    f"Falling back to local SQLite temporarily: {exc}"
+                )
+                self._supabase = None
                 self._mode = "sqlite"
 
         if self._mode == "sqlite":
@@ -141,24 +149,36 @@ class DatabaseClient:
     def init_and_seed_if_empty(self) -> dict[str, Any]:
         if self._mode == "sqlite":
             self._ensure_sqlite_schema()
-        wallets = self.get_wallets()
-        seeded_wallets = 0
-        if not wallets:
-            for w in INITIAL_WALLETS:
-                self._upsert_wallet(w)
-                seeded_wallets += 1
+        try:
+            wallets = self.get_wallets()
+            seeded_wallets = 0
+            if not wallets:
+                for w in INITIAL_WALLETS:
+                    self._upsert_wallet(w)
+                    seeded_wallets += 1
 
-        clean_logs = self.get_clean_baseline_logs(limit=5)
-        seeded_logs = 0
-        if not clean_logs:
-            baseline_rows = generate_clean_baseline_logs(300)
-            seeded_logs = self.insert_api_logs_bulk(baseline_rows)
+            clean_logs = self.get_clean_baseline_logs(limit=5)
+            seeded_logs = 0
+            if not clean_logs:
+                baseline_rows = generate_clean_baseline_logs(300)
+                seeded_logs = self.insert_api_logs_bulk(baseline_rows)
 
-        return {
-            "db_mode": self._mode,
-            "seeded_wallets": seeded_wallets,
-            "seeded_clean_baseline_logs": seeded_logs,
-        }
+            return {
+                "db_mode": self._mode,
+                "seeded_wallets": seeded_wallets,
+                "seeded_clean_baseline_logs": seeded_logs,
+            }
+        except Exception as exc:
+            if self._mode == "supabase":
+                print(
+                    "[FinSec DB] Supabase write/seed blocked (likely RLS with publishable key). "
+                    "Use Supabase Secret Key (sb_secret_...) or run DISABLE ROW LEVEL SECURITY in SQL Editor. "
+                    f"Falling back to SQLite temporarily: {exc}"
+                )
+                self._supabase = None
+                self._mode = "sqlite"
+                return self.init_and_seed_if_empty()
+            raise
 
     def _upsert_wallet(self, wallet: dict[str, Any]) -> None:
         if self._mode == "supabase":

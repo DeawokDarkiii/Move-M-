@@ -50,50 +50,7 @@ finsec-agent/
 
 ---
 
-## 3. Hướng dẫn Chạy Nhanh (Local)
-
-### Backend (FastAPI)
-```bash
-cd backend
-python -m venv .venv
-# Windows PowerShell:
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-
-# (Tùy chọn) Copy .env.example thành .env và điền SUPABASE_URL, SUPABASE_KEY, GEMINI_API_KEY
-# Nếu để trống, hệ thống tự chạy SQLite local (5 ví + 300 baseline logs) và ReAct Fallback Engine
-uvicorn app.main:app --reload --port 8000
-```
-- Swagger API Docs: `http://localhost:8000/docs`
-- Demo `X-API-Key`: `finsec-demo-key-2026`
-
-### Frontend (Next.js)
-```bash
-cd frontend
-npm install
-npm run dev
-```
-- Giao diện AI SOC Workspace: `http://localhost:3000`
-
----
-
-## 4. Hướng dẫn Deploy Trực tuyến (Supabase + Render/Railway + Vercel)
-
-1. **Supabase (PostgreSQL)**:
-   - Mở **SQL Editor** trên Supabase, chạy toàn bộ file `backend/sql/schema.sql`.
-   - Cấu hình `SUPABASE_URL` và `SUPABASE_KEY` (Service Role Key) trong `backend/.env`, sau đó chạy `python backend/scripts/seed_db.py` để bơm 5 ví mẫu + 300 log sạch (`is_clean_baseline = TRUE`).
-2. **Backend (Render hoặc Railway)**:
-   - Import repo Git vào Render (dùng sẵn `render.yaml`) hoặc Railway (Root Directory: `backend`).
-   - Thêm biến môi trường: `SUPABASE_URL`, `SUPABASE_KEY`, `GEMINI_API_KEY`, `GEMINI_MODEL=gemini-3.8-flash`, `FINSEC_API_KEY=finsec-demo-key-2026`.
-3. **Frontend (Vercel)**:
-   - Import repo Git vào Vercel, đặt **Root Directory** = `frontend`.
-   - Thêm biến môi trường:
-     - `NEXT_PUBLIC_API_BASE_URL=https://<your-backend>.onrender.com`
-     - `NEXT_PUBLIC_FINSEC_API_KEY=finsec-demo-key-2026`
-
----
-
-## 5. Kiểm thử Dịch vụ API bằng cURL
+## 3. Kiểm thử Dịch vụ API bằng cURL
 
 ```bash
 # 1. Đẩy log giả lập vào hệ thống

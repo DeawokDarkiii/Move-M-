@@ -67,3 +67,14 @@ CREATE TABLE IF NOT EXISTS incidents (
 );
 
 CREATE INDEX IF NOT EXISTS idx_incidents_created_at ON incidents(created_at DESC);
+
+-- Ensure Supabase API roles (publishable/anon & service_role) can access demo tables cleanly
+ALTER TABLE wallets DISABLE ROW LEVEL SECURITY;
+ALTER TABLE ledger_entries DISABLE ROW LEVEL SECURITY;
+ALTER TABLE api_logs DISABLE ROW LEVEL SECURITY;
+ALTER TABLE policy_rules DISABLE ROW LEVEL SECURITY;
+ALTER TABLE incidents DISABLE ROW LEVEL SECURITY;
+
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
