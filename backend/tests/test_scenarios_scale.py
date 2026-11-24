@@ -61,9 +61,16 @@ def test_900_scenario_catalog_and_high_volume_ab_comparison() -> None:
         assert r_sim_off.status_code == 200
         sim_off = r_sim_off.json()
         assert sim_off["total_transactions"] == 50000
+        # Traditional bank/fintech security already blocks ~48%-72% of naive/flood attacks, not 0%!
+        assert 45.0 <= sim_off["without_ai"]["block_rate_pct"] <= 75.0
+        assert sim_off["without_ai"]["attacks_blocked"] > 0
+        assert sim_off["without_ai"]["false_positives"] > 0
         assert sim_off["without_ai"]["financial_loss_vnd"] > 0
-        assert sim_off["with_ai_live"]["block_rate_pct"] == 0.0
+        # When AI Shield is OFF, live block rate equals traditional WAF baseline
+        assert sim_off["with_ai_live"]["block_rate_pct"] == sim_off["without_ai"]["block_rate_pct"]
+        assert sim_off["with_ai_live"]["ai_extra_blocked"] == 0
         assert sim_off["with_ai_full_shield"]["block_rate_pct"] == 100.0
+        assert sim_off["with_ai_full_shield"]["ai_extra_blocked"] > 0
         assert len(sim_off["accounts_comparison"]) == 5
         assert len(sim_off["vector_breakdown"]) == 4
         # Verify realistic non-uniform per-account distribution & Fintech roles

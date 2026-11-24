@@ -233,59 +233,75 @@ export function AiComparisonOverview({
             </div>
           </div>
 
-          {/* SIDE-BY-SIDE HERO COMPARISON: WITHOUT AI vs WITH FINSEC AI */}
+          {/* SIDE-BY-SIDE HERO COMPARISON: TRADITIONAL BANK SECURITY vs TRADITIONAL + FINSEC AI */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* LEFT: WITHOUT AI */}
-            <div className="rounded-2xl border border-rose-500/40 bg-gradient-to-br from-rose-950/35 via-[#0d1424] to-[#0d1424] p-5 shadow-xl space-y-4">
-              <div className="flex items-center justify-between">
+            {/* LEFT: TRADITIONAL STATIC SECURITY (NO AI) */}
+            <div className="rounded-2xl border border-amber-500/40 bg-gradient-to-br from-rose-950/30 via-[#0d1424] to-[#0d1424] p-5 shadow-xl space-y-4">
+              <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-500/20 border border-rose-500/40 text-rose-400">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300">
                     <ShieldAlert className="h-4 w-4" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-rose-200">
-                      KHÔNG CÓ AI BẢO VỆ (Hệ thống gốc)
+                    <h3 className="text-sm font-bold text-amber-200">
+                      BẢO MẬT TRUYỀN THỐNG (WAF + Rate Limit · Không AI)
                     </h3>
-                    <p className="text-[11px] text-rose-300/70">
-                      Không có Virtual Patching — Tấn công đi thẳng vào Payment API
+                    <p className="text-[11px] text-slate-400">
+                      Đã có code auth, WAF &amp; rate-limit tĩnh — nhưng vẫn lọt tấn công logic nghiệp vụ
                     </p>
                   </div>
                 </div>
-                <span className="rounded-full bg-rose-500/20 border border-rose-500/40 px-2.5 py-0.5 text-[11px] font-bold text-rose-200">
-                  0% CHẶN
+                <span className="rounded-full bg-amber-500/20 border border-amber-500/40 px-2.5 py-0.5 text-[11px] font-bold text-amber-200 whitespace-nowrap">
+                  {noAi?.block_rate_pct ?? 60}% CHẶN · LỌT {(100 - (noAi?.block_rate_pct ?? 60)).toFixed(1)}%
                 </span>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-xl border border-rose-500/30 bg-black/35 p-3">
-                  <div className="text-[11px] text-slate-400">Thiệt hại / Rủi ro Tài chính</div>
+                <div className="rounded-xl border border-slate-700 bg-black/35 p-3">
+                  <div className="text-[11px] text-slate-400">WAF / Code tĩnh đã chặn</div>
+                  <div className="mt-1 font-mono text-xl font-extrabold text-sky-300">
+                    {(noAi?.attacks_blocked ?? 0).toLocaleString("vi-VN")}{" "}
+                    <span className="text-xs font-normal text-slate-400">lượt</span>
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">
+                    Chặn flood, IP xấu, token sai, payload lỗi
+                  </div>
+                </div>
+                <div className="rounded-xl border border-rose-500/35 bg-black/35 p-3">
+                  <div className="text-[11px] text-slate-400">Tấn công logic vượt qua WAF</div>
                   <div className="mt-1 font-mono text-xl font-extrabold text-rose-400">
-                    {formatVnd(noAi?.financial_loss_vnd ?? 0)}
-                  </div>
-                </div>
-                <div className="rounded-xl border border-rose-500/30 bg-black/35 p-3">
-                  <div className="text-[11px] text-slate-400">Tấn công khai thác lọt qua</div>
-                  <div className="mt-1 font-mono text-xl font-extrabold text-rose-300">
                     {(noAi?.attacks_succeeded ?? 0).toLocaleString("vi-VN")}{" "}
-                    <span className="text-xs font-normal text-slate-400">req</span>
+                    <span className="text-xs font-normal text-slate-400">lọt qua</span>
+                  </div>
+                  <div className="text-[10px] text-rose-300/80 mt-0.5">
+                    Thiệt hại: {formatVnd(noAi?.financial_loss_vnd ?? 0)} ({noAi?.compromised_accounts ?? 0} ví)
                   </div>
                 </div>
                 <div className="rounded-xl border border-slate-800 bg-black/25 p-3">
-                  <div className="text-[11px] text-slate-400">Tài khoản bị xâm phạm</div>
-                  <div className="mt-1 font-mono text-base font-bold text-amber-300">
-                    {noAi?.compromised_accounts ?? 0} / {scaleResult.accounts_comparison.length} ví
-                  </div>
-                </div>
-                <div className="rounded-xl border border-slate-800 bg-black/25 p-3">
-                  <div className="text-[11px] text-slate-400">Bản ghi tài chính rò rỉ</div>
+                  <div className="text-[11px] text-slate-400">Khách thật bị WAF chặn nhầm</div>
                   <div className="mt-1 font-mono text-base font-bold text-orange-300">
-                    {(noAi?.records_leaked ?? 0).toLocaleString("vi-VN")} records
+                    {(noAi?.false_positives ?? 0).toLocaleString("vi-VN")}{" "}
+                    <span className="text-[11px] text-orange-400">
+                      ({noAi?.false_positive_rate_pct ?? 0.7}%)
+                    </span>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-800 bg-black/25 p-3">
+                  <div className="text-[11px] text-slate-400">Thời gian vá lỗ hổng (MTTR)</div>
+                  <div className="mt-1 font-mono text-base font-bold text-amber-300">
+                    ~{Math.round((noAi?.mttr_minutes ?? 180) / 60 * 10) / 10} giờ{" "}
+                    <span className="text-[11px] font-normal text-slate-400">(thủ công)</span>
                   </div>
                 </div>
               </div>
+
+              <div className="rounded-lg border border-rose-500/25 bg-black/30 px-3 py-2 text-[11px] text-slate-300">
+                <strong className="text-rose-300">Điểm mù của bảo mật tĩnh:</strong>{" "}
+                WAF &amp; rate-limit chỉ kiểm tra cú pháp/tần suất thô, không hiểu ngữ cảnh nghiệp vụ (trùng <code>event_id</code>, đổi <code>wallet_id</code> bằng JWT thật, rút song song &lt;100ms) và dễ chặn nhầm khách thật giờ cao điểm.
+              </div>
             </div>
 
-            {/* RIGHT: WITH FINSEC AI */}
+            {/* RIGHT: TRADITIONAL + FINSEC AI */}
             <div className="rounded-2xl border border-emerald-500/40 bg-gradient-to-br from-emerald-950/35 via-[#0d1424] to-[#0d1424] p-5 shadow-xl space-y-4">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
@@ -294,49 +310,54 @@ export function AiComparisonOverview({
                   </div>
                   <div>
                     <h3 className="text-sm font-bold text-emerald-200">
-                      CÓ FINSEC AI BẢO VỆ{" "}
-                      {showingProjected ? "(Mô phỏng Lá chắn AI)" : "(Đang chạy Live Middleware)"}
+                      BẢO MẬT TRUYỀN THỐNG + FINSEC AI{" "}
+                      {showingProjected ? "(Xem trước Lá chắn AI)" : "(Đang chạy Live)"}
                     </h3>
                     <p className="text-[11px] text-emerald-300/75">
                       {showingProjected
-                        ? "Hiện chưa bật luật Live — đây là kết quả khi bật Lá chắn AI (bấm nút Bật ở trên)"
-                        : `Đang có ${scaleResult.active_rules_count} luật Virtual Patch ACTIVE (<5ms)`}
+                        ? "Bấm 'Bật Lá chắn AI' ở trên để áp dụng thật trên Live Middleware"
+                        : `Đang bật ${scaleResult.active_rules_count} luật Virtual Patch bổ sung trên nền bảo mật sẵn có`}
                     </p>
                   </div>
                 </div>
                 <span className="rounded-full bg-emerald-500/20 border border-emerald-500/40 px-2.5 py-0.5 text-[11px] font-bold text-emerald-200 whitespace-nowrap">
-                  {aiDisplay?.block_rate_pct ?? 100}% CHẶN
+                  {aiDisplay?.block_rate_pct ?? 100}% CHẶN (+{aiDisplay?.ai_gap_closed_pct ?? 0}% TỪ AI)
                 </span>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-xl border border-emerald-500/30 bg-black/35 p-3">
-                  <div className="text-[11px] text-slate-400">Tiền bảo toàn nhờ AI</div>
+                  <div className="text-[11px] text-slate-400">Thiệt hại ngăn chặn thêm nhờ AI</div>
                   <div className="mt-1 font-mono text-xl font-extrabold text-emerald-400">
                     +{formatVnd(aiDisplay?.financial_saved_vnd ?? 0)}
                   </div>
+                  <div className="text-[10px] text-emerald-300/80 mt-0.5">
+                    Bịt kín phần lỗ hổng logic mà WAF tĩnh bỏ lọt
+                  </div>
                 </div>
                 <div className="rounded-xl border border-emerald-500/30 bg-black/35 p-3">
-                  <div className="text-[11px] text-slate-400">Số request tấn công bị chặn đứng</div>
+                  <div className="text-[11px] text-slate-400">AI chặn bổ sung (vượt qua WAF)</div>
                   <div className="mt-1 font-mono text-xl font-extrabold text-sky-300">
-                    {(aiDisplay?.attacks_blocked ?? 0).toLocaleString("vi-VN")}{" "}
-                    <span className="text-xs font-normal text-slate-400">lượt tấn công</span>
+                    +{(aiDisplay?.ai_extra_blocked ?? 0).toLocaleString("vi-VN")}{" "}
+                    <span className="text-xs font-normal text-slate-400">lượt logic</span>
                   </div>
                   <div className="text-[10px] text-slate-400 mt-0.5">
-                    Từ chối bằng mã HTTP 403 Forbidden / 429 Too Many Requests
+                    Tổng chặn: {(aiDisplay?.attacks_blocked ?? 0).toLocaleString("vi-VN")} (HTTP 403 / 429)
                   </div>
                 </div>
                 <div className="rounded-xl border border-slate-800 bg-black/25 p-3">
-                  <div className="text-[11px] text-slate-400">Khách hàng thật an toàn (HTTP 200 OK)</div>
+                  <div className="text-[11px] text-slate-400">Khách thật bị chặn nhầm (Dry-Run)</div>
                   <div className="mt-1 font-mono text-base font-bold text-emerald-300">
-                    {(aiDisplay?.clean_transactions_preserved ?? 0).toLocaleString("vi-VN")}{" "}
-                    <span className="text-[11px] text-emerald-400">(0% chặn nhầm)</span>
+                    0 <span className="text-[11px] text-emerald-400">(0.00% · cứu {(noAi?.false_positives ?? 0).toLocaleString("vi-VN")} khách)</span>
                   </div>
                 </div>
                 <div className="rounded-xl border border-slate-800 bg-black/25 p-3">
-                  <div className="text-[11px] text-slate-400">Độ trễ Middleware trung bình</div>
+                  <div className="text-[11px] text-slate-400">Thời gian vá nóng (MTTR) &amp; Độ trễ</div>
                   <div className="mt-1 font-mono text-base font-bold text-sky-300">
-                    {aiDisplay?.avg_middleware_latency_ms ?? 1.8} ms
+                    &lt; 1 phút{" "}
+                    <span className="text-[11px] font-normal text-slate-400">
+                      ({aiDisplay?.avg_middleware_latency_ms ?? 1.8} ms)
+                    </span>
                   </div>
                 </div>
               </div>
@@ -503,15 +524,34 @@ export function AiComparisonOverview({
             </div>
           </div>
 
-          {/* MULTI-VECTOR BREAKDOWN (REAL SOC TELEMETRY) */}
+          {/* MULTI-VECTOR BREAKDOWN (3-SEGMENT REAL SOC TELEMETRY) */}
           <div className="rounded-2xl border border-slate-800 bg-[#0d1424]/95 p-4 shadow-xl space-y-3">
-            <h3 className="text-sm font-bold text-white">
-              Phân rã từng Mũi tấn công Diễn ra Đồng thời ({scaleResult.vector_breakdown.length} vectors)
-            </h3>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-bold text-white">
+                Phân rã từng Mũi tấn công Đồng thời: WAF tĩnh chặn vs FinSec AI chặn bổ sung ({scaleResult.vector_breakdown.length} vectors)
+              </h3>
+              <div className="flex items-center gap-3 text-[10px] text-slate-400">
+                <span className="inline-flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-sky-500" /> WAF/Code tĩnh đã chặn
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-emerald-400" /> FinSec AI chặn bổ sung
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-rose-500" /> Lọt qua (nếu chưa bật AI)
+                </span>
+              </div>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {scaleResult.vector_breakdown.map((v) => {
-                const blockedCount = showingProjected ? v.blocked_by_ai_full : v.blocked_by_ai_live;
-                const blockPct = v.attempts > 0 ? Math.round((blockedCount / v.attempts) * 100) : 100;
+                const tradBlocked = v.blocked_by_traditional ?? 0;
+                const aiExtra = showingProjected
+                  ? (v.blocked_by_ai_extra_full ?? v.succeeded_without_ai)
+                  : (v.blocked_by_ai_extra_live ?? 0);
+                const tradPct = v.attempts > 0 ? Math.round((tradBlocked / v.attempts) * 100) : 0;
+                const aiExtraPct = v.attempts > 0 ? Math.round((aiExtra / v.attempts) * 100) : 0;
+                const leakedPct = Math.max(0, 100 - tradPct - aiExtraPct);
+
                 return (
                   <div
                     key={v.vector}
@@ -535,31 +575,44 @@ export function AiComparisonOverview({
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between text-[11px] font-mono">
-                      <span className="text-slate-400">
-                        Tấn công: <strong className="text-white">{v.attempts.toLocaleString("vi-VN")}</strong>
-                      </span>
-                      <span className="text-rose-300">
-                        Không AI lọt: <strong>{v.succeeded_without_ai.toLocaleString("vi-VN")}</strong>
+                    <div className="flex flex-wrap items-center justify-between gap-1 text-[11px] font-mono">
+                      <span className="text-sky-300">
+                        WAF tĩnh: <strong>{tradBlocked.toLocaleString("vi-VN")} ({tradPct}%)</strong>
                       </span>
                       <span className="text-emerald-300">
-                        AI chặn: <strong>{blockedCount.toLocaleString("vi-VN")} ({blockPct}%)</strong>
+                        AI chặn thêm: <strong>+{aiExtra.toLocaleString("vi-VN")} ({aiExtraPct}%)</strong>
+                      </span>
+                      <span className="text-rose-300">
+                        Thiệt hại nếu lọt: <strong>{formatVnd(v.loss_without_ai_vnd)}</strong>
                       </span>
                     </div>
 
-                    <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden">
+                    {/* 3-segment stacked bar: Traditional WAF + FinSec AI + Remaining Leaked */}
+                    <div className="h-2.5 w-full rounded-full bg-slate-800 overflow-hidden flex">
                       <div
-                        className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-sky-400 transition-all"
-                        style={{ width: `${blockPct}%` }}
+                        className="h-full bg-sky-500/80 transition-all"
+                        style={{ width: `${tradPct}%` }}
+                        title={`WAF tĩnh đã chặn: ${tradPct}%`}
                       />
+                      <div
+                        className="h-full bg-emerald-400 transition-all"
+                        style={{ width: `${aiExtraPct}%` }}
+                        title={`FinSec AI chặn bổ sung: ${aiExtraPct}%`}
+                      />
+                      {leakedPct > 0 && (
+                        <div
+                          className="h-full bg-rose-500/85 transition-all"
+                          style={{ width: `${leakedPct}%` }}
+                          title={`Đang lọt qua: ${leakedPct}%`}
+                        />
+                      )}
                     </div>
 
-                    <div className="text-[11px] text-slate-400 flex items-center justify-between">
-                      <span>Thiệt hại nếu không có AI:</span>
-                      <span className="font-mono font-bold text-rose-300">
-                        {formatVnd(v.loss_without_ai_vnd)}
-                      </span>
-                    </div>
+                    {v.traditional_gap_reason && (
+                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                        {v.traditional_gap_reason}
+                      </p>
+                    )}
                   </div>
                 );
               })}

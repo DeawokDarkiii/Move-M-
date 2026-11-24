@@ -349,7 +349,10 @@ export interface VectorBreakdownItem {
   endpoint: string;
   condition_type: string;
   attempts: number;
+  blocked_by_traditional?: number;
   succeeded_without_ai: number;
+  blocked_by_ai_extra_live?: number;
+  blocked_by_ai_extra_full?: number;
   blocked_by_ai_live: number;
   leaked_live: number;
   blocked_by_ai_full: number;
@@ -358,6 +361,7 @@ export interface VectorBreakdownItem {
   loss_prevented_full_vnd: number;
   rule_currently_active: boolean;
   block_http_code: number;
+  traditional_gap_reason?: string;
 }
 
 export interface AccountComparisonItem {
@@ -394,16 +398,23 @@ export interface ScaleSimulationResponse {
   active_rules_count: number;
   active_condition_types: string[];
   without_ai: {
+    defense_label?: string;
     attacks_succeeded: number;
     attacks_blocked: number;
     block_rate_pct: number;
     financial_loss_vnd: number;
     compromised_accounts: number;
     records_leaked: number;
+    clean_transactions_preserved?: number;
+    false_positives?: number;
+    false_positive_rate_pct?: number;
+    mttr_minutes?: number;
     prompt_injection_status: string;
   };
   with_ai_live: {
     attacks_blocked: number;
+    ai_extra_blocked?: number;
+    ai_gap_closed_pct?: number;
     attacks_leaked: number;
     block_rate_pct: number;
     financial_loss_vnd: number;
@@ -413,11 +424,14 @@ export interface ScaleSimulationResponse {
     clean_transactions_preserved: number;
     false_positives: number;
     false_positive_rate_pct: number;
+    mttr_minutes?: number;
     avg_middleware_latency_ms: number;
     prompt_injection_status: string;
   };
   with_ai_full_shield: {
     attacks_blocked: number;
+    ai_extra_blocked?: number;
+    ai_gap_closed_pct?: number;
     attacks_leaked: number;
     block_rate_pct: number;
     financial_loss_vnd: number;
@@ -427,6 +441,7 @@ export interface ScaleSimulationResponse {
     clean_transactions_preserved: number;
     false_positives: number;
     false_positive_rate_pct: number;
+    mttr_minutes?: number;
     avg_middleware_latency_ms: number;
     prompt_injection_status: string;
   };

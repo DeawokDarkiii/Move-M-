@@ -160,14 +160,22 @@ VECTOR_META: dict[str, dict[str, Any]] = {
         "endpoint": "/sandbox/webhook/payment-success",
         "avg_loss_per_hit_vnd": 1_500_000,
         "block_http_code": 403,
+        "traditional_block_range": (0.52, 0.66),
+        "traditional_gap_reason": (
+            "WAF & Rate Limit chặn được flood từ IP xấu đã biết (~58%), nhưng lọt các gói replay có chữ ký/JSON hợp lệ gửi qua proxy sạch hoặc độ trễ vài giây."
+        ),
     },
     "bola_idor": {
         "label": "BOLA / IDOR (Đọc trộm ví khách khác)",
         "owasp": "API1:2023",
         "condition_type": "ENFORCE_OWNER_MATCH",
         "endpoint": "/sandbox/wallets/{wallet_id}",
-        "avg_loss_per_hit_vnd": 180_000,  # compliance/data-leak exposure cost estimate
+        "avg_loss_per_hit_vnd": 180_000,
         "block_http_code": 403,
+        "traditional_block_range": (0.48, 0.62),
+        "traditional_gap_reason": (
+            "Auth tĩnh chặn được request thiếu JWT/token hết hạn (~55%), nhưng không kiểm tra chéo chủ sở hữu khi tài khoản thật đổi wallet_id."
+        ),
     },
     "leaked_key": {
         "label": "Lộ Internal Key (Trích xuất đối soát)",
@@ -176,6 +184,10 @@ VECTOR_META: dict[str, dict[str, Any]] = {
         "endpoint": "/sandbox/admin/settlement",
         "avg_loss_per_hit_vnd": 950_000,
         "block_http_code": 403,
+        "traditional_block_range": (0.56, 0.70),
+        "traditional_gap_reason": (
+            "API Gateway chặn được key sai/brute-force (~63%), nhưng cho qua nếu kẻ tấn công dùng đúng key nội bộ bị lộ từ IP VPS công cộng."
+        ),
     },
     "race_condition": {
         "label": "Race Condition (Rút tiền âm ví TOCTOU)",
@@ -184,6 +196,10 @@ VECTOR_META: dict[str, dict[str, Any]] = {
         "endpoint": "/sandbox/withdraw",
         "avg_loss_per_hit_vnd": 2_200_000,
         "block_http_code": 429,
+        "traditional_block_range": (0.58, 0.72),
+        "traditional_gap_reason": (
+            "Rate limit theo phút (60 req/phút) chặn được đợt xả kéo dài (~65%), nhưng lọt các cụm 5–10 lệnh rút bắn song song trong dưới 100ms."
+        ),
     },
 }
 
@@ -580,7 +596,10 @@ def run_scale_simulation(
     vector_breakdown: list[dict[str, Any]] = []
     total_loss_without_ai = 0
     total_loss_with_ai_live = 0
+    total_blocked_traditional = 0
     total_blocked_live = 0
+    total_blocked_ai_extra_live = 0
+    total_blocked_ai_extra_full = 0
     total_blocked_full = 0
     total_records_leaked_without_ai = 0
     total_records_leaked_live = 0
@@ -590,16 +609,22 @@ def run_scale_simulation(
         ctype = meta["condition_type"]
         is_covered_live = ctype in active_condition_types
 
-        # Realistic exploitation rate on unprotected system (70% - 95% of bursts succeed)
-        succeeded_without_ai = max(1, int(attempts * rng.uniform(0.78, 0.94)))
-        # With AI rule active, declarative policy blocks 100% of matching attacks
-        blocked_live = attempts if is_covered_live else 0
+        # Realistic Traditional Bank/Fintech Security (WAF + Static Rate Limit + Basic Auth):
+        # Already blocks ~48%-72% of naive/flood/invalid attacks, but misses sophisticated business-logic attacks.
+        trad_min, trad_max = meta["traditional_block_range"]
+        blocked_by_traditional = max(1, int(round(attempts * rng.uniform(trad_min, trad_max))))
+        blocked_by_traditional = min(blocked_by_traditional, max(0, attempts - 1))
+        succeeded_without_ai = max(1, attempts - blocked_by_traditional)
+
+        # With FinSec AI Virtual Patching active on top of traditional security:
+        ai_extra_live = succeeded_without_ai if is_covered_live else 0
+        blocked_live = blocked_by_traditional + ai_extra_live
         leaked_live = 0 if is_covered_live else succeeded_without_ai
+        ai_extra_full = succeeded_without_ai
         blocked_full = attempts
 
-        # Compute financial loss / risk exposure
+        # Compute financial loss / risk exposure ONLY from attacks that bypassed traditional security
         if vec == "webhook_replay":
-            # Every ~15 duplicate hits = 1 effective replay batch causing fake credit
             effective_credits = max(2, succeeded_without_ai // 12)
             loss_without_ai = effective_credits * rng.randint(1_200_000, 2_500_000)
         elif vec == "race_condition":
@@ -614,7 +639,10 @@ def run_scale_simulation(
 
         total_loss_without_ai += loss_without_ai
         total_loss_with_ai_live += loss_live
+        total_blocked_traditional += blocked_by_traditional
         total_blocked_live += blocked_live
+        total_blocked_ai_extra_live += ai_extra_live
+        total_blocked_ai_extra_full += ai_extra_full
         total_blocked_full += blocked_full
 
         # Distribute impact NON-UNIFORMLY across target wallets based on realistic Fintech account roles
@@ -674,7 +702,10 @@ def run_scale_simulation(
                 "endpoint": meta["endpoint"],
                 "condition_type": ctype,
                 "attempts": attempts,
+                "blocked_by_traditional": blocked_by_traditional,
                 "succeeded_without_ai": succeeded_without_ai,
+                "blocked_by_ai_extra_live": ai_extra_live,
+                "blocked_by_ai_extra_full": ai_extra_full,
                 "blocked_by_ai_live": blocked_live,
                 "leaked_live": leaked_live,
                 "blocked_by_ai_full": blocked_full,
@@ -683,6 +714,7 @@ def run_scale_simulation(
                 "loss_prevented_full_vnd": loss_without_ai,
                 "rule_currently_active": is_covered_live,
                 "block_http_code": meta["block_http_code"],
+                "traditional_gap_reason": meta["traditional_gap_reason"],
             }
         )
 
@@ -797,7 +829,31 @@ def run_scale_simulation(
             db.insert_api_logs_bulk(sample_rows)
 
     elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
-    live_block_rate = round((total_blocked_live / total_attacks) * 100.0, 2) if total_attacks else 100.0
+    trad_block_rate = (
+        round((total_blocked_traditional / total_attacks) * 100.0, 2)
+        if total_attacks
+        else 100.0
+    )
+    live_block_rate = (
+        round((total_blocked_live / total_attacks) * 100.0, 2)
+        if total_attacks
+        else 100.0
+    )
+    ai_gap_closed_live_pct = (
+        round((total_blocked_ai_extra_live / total_attacks) * 100.0, 2)
+        if total_attacks
+        else 0.0
+    )
+    ai_gap_closed_full_pct = (
+        round((total_blocked_ai_extra_full / total_attacks) * 100.0, 2)
+        if total_attacks
+        else 0.0
+    )
+
+    # Traditional static WAF / aggressive IP rate-limit blocks ~0.35% - 1.15% of legitimate customers at peak load
+    trad_fp_count = max(1, int(round(clean_transactions * rng.uniform(0.0035, 0.0115))))
+    trad_fp_rate = round((trad_fp_count / clean_transactions) * 100.0, 2) if clean_transactions else 0.0
+    trad_mttr_minutes = rng.randint(110, 240)
 
     return {
         "scenario": scenario
@@ -820,16 +876,23 @@ def run_scale_simulation(
         "active_rules_count": len(live_rules),
         "active_condition_types": sorted(active_condition_types),
         "without_ai": {
+            "defense_label": "Bảo mật Tĩnh Truyền thống (WAF + Rate Limit + Auth cơ bản)",
             "attacks_succeeded": sum(v["succeeded_without_ai"] for v in vector_breakdown),
-            "attacks_blocked": 0,
-            "block_rate_pct": 0.0,
+            "attacks_blocked": total_blocked_traditional,
+            "block_rate_pct": trad_block_rate,
             "financial_loss_vnd": total_loss_without_ai,
             "compromised_accounts": compromised_without_ai_count,
             "records_leaked": total_records_leaked_without_ai,
-            "prompt_injection_status": "VULNERABLE (AI SOC có thể bị đánh lừa)" if pi_enabled else "N/A",
+            "clean_transactions_preserved": max(0, clean_transactions - trad_fp_count),
+            "false_positives": trad_fp_count,
+            "false_positive_rate_pct": trad_fp_rate,
+            "mttr_minutes": trad_mttr_minutes,
+            "prompt_injection_status": "VULNERABLE (Không có lớp sanitizer chống Prompt Injection)" if pi_enabled else "N/A",
         },
         "with_ai_live": {
             "attacks_blocked": total_blocked_live,
+            "ai_extra_blocked": total_blocked_ai_extra_live,
+            "ai_gap_closed_pct": ai_gap_closed_live_pct,
             "attacks_leaked": sum(v["leaked_live"] for v in vector_breakdown),
             "block_rate_pct": live_block_rate,
             "financial_loss_vnd": total_loss_with_ai_live,
@@ -839,11 +902,14 @@ def run_scale_simulation(
             "clean_transactions_preserved": clean_transactions,
             "false_positives": 0,
             "false_positive_rate_pct": 0.0,
+            "mttr_minutes": 1,
             "avg_middleware_latency_ms": round(rng.uniform(1.3, 2.8), 2),
             "prompt_injection_status": "IMMUNE (sanitizer.py cô lập 100%)" if pi_enabled else "N/A",
         },
         "with_ai_full_shield": {
             "attacks_blocked": total_blocked_full,
+            "ai_extra_blocked": total_blocked_ai_extra_full,
+            "ai_gap_closed_pct": ai_gap_closed_full_pct,
             "attacks_leaked": 0,
             "block_rate_pct": 100.0,
             "financial_loss_vnd": 0,
@@ -853,6 +919,7 @@ def run_scale_simulation(
             "clean_transactions_preserved": clean_transactions,
             "false_positives": 0,
             "false_positive_rate_pct": 0.0,
+            "mttr_minutes": 1,
             "avg_middleware_latency_ms": round(rng.uniform(1.4, 2.6), 2),
             "prompt_injection_status": "IMMUNE (sanitizer.py cô lập 100%)" if pi_enabled else "N/A",
         },
