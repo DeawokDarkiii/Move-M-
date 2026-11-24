@@ -17,16 +17,23 @@ Supporting SOC Workspace Endpoints:
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from typing import Any, Literal, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.agent.investigator import investigate_incident
+from app.agent.report_exporter import (
+    build_structured_analysis,
+    render_html_report,
+    render_markdown_report,
+)
 from app.config import get_settings
 from app.db import db
 from app.policy.engine import (
@@ -130,7 +137,83 @@ async def run_investigation(
 ) -> dict[str, Any]:
     trigger = payload.trigger_message if payload else None
     report = await asyncio.to_thread(investigate_incident, trigger)
+    report["structured_analysis"] = build_structured_analysis(report)
     return report
+
+
+# ------------------------------------------------------------------
+# 2b. GET /v1/incidents/{incident_id}/analysis & /export
+# ------------------------------------------------------------------
+@router.get(
+    "/incidents/{incident_id}/analysis",
+    summary="Get Dual-Layer Executive & Technical SOC Analysis for an Incident",
+)
+@limiter.limit("60/minute")
+async def get_incident_analysis(
+    request: Request,
+    incident_id: str,
+    _api_key: str = Depends(verify_api_key),
+) -> dict[str, Any]:
+    incident = db.get_incident(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail=f"Incident '{incident_id}' not found")
+    return {
+        "incident_id": incident_id,
+        "structured_analysis": build_structured_analysis(incident),
+    }
+
+
+@router.get(
+    "/incidents/{incident_id}/export",
+    summary="Export SOC Incident Report (Markdown, Print-to-PDF HTML, or JSON)",
+)
+@limiter.limit("60/minute")
+async def export_incident_report(
+    request: Request,
+    incident_id: str,
+    format: Literal["markdown", "html", "json"] = Query(
+        default="markdown",
+        description="Export format: markdown (.md), html (print-to-PDF), or json (SIEM/SOAR)",
+    ),
+    _api_key: str = Depends(verify_api_key),
+) -> Response:
+    incident = db.get_incident(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail=f"Incident '{incident_id}' not found")
+
+    safe_id = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in incident_id)
+
+    if format == "markdown":
+        content = render_markdown_report(incident)
+        return Response(
+            content=content,
+            media_type="text/markdown; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="finsec-report-{safe_id}.md"'
+            },
+        )
+
+    if format == "html":
+        content = render_html_report(incident)
+        return Response(
+            content=content,
+            media_type="text/html; charset=utf-8",
+            headers={
+                "Content-Disposition": f'inline; filename="finsec-report-{safe_id}.html"'
+            },
+        )
+
+    enriched = {
+        **incident,
+        "structured_analysis": build_structured_analysis(incident),
+    }
+    return Response(
+        content=json.dumps(enriched, indent=2, ensure_ascii=False),
+        media_type="application/json; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="finsec-report-{safe_id}.json"'
+        },
+    )
 
 
 # ------------------------------------------------------------------
@@ -228,7 +311,10 @@ async def get_sandbox_state(
     wallets = db.get_wallets()
     rules = db.list_policy_rules()
     active_rules = [r for r in rules if r["status"] == "ACTIVE"]
-    incidents = db.list_incidents(limit=10)
+    incidents = [
+        {**inc, "structured_analysis": build_structured_analysis(inc)}
+        for inc in db.list_incidents(limit=10)
+    ]
     recent_logs = db.get_recent_non_baseline_logs(limit=25)
     clean_baseline_count = len(db.get_clean_baseline_logs(limit=500))
     settings = get_settings()

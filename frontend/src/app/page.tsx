@@ -11,6 +11,7 @@ import {
   Cpu,
   Database,
   ExternalLink,
+  FileText,
   Flame,
   KeyRound,
   Lock,
@@ -22,11 +23,13 @@ import {
   ShieldOff,
   Terminal,
   UserCheck,
-  Wallet as WalletIcon,
   Zap,
 } from "lucide-react";
 
 import { DiffViewer } from "@/components/DiffViewer";
+import { IncidentAnalysisReport } from "@/components/IncidentAnalysisReport";
+import { LiveLogsPanel } from "@/components/LiveLogsPanel";
+import { WalletMonitorGrid } from "@/components/WalletMonitorGrid";
 import {
   API_BASE_URL,
   DEMO_API_KEY,
@@ -36,14 +39,13 @@ import {
   SimulationResponse,
   enforcePolicyRule,
   fetchSandboxState,
-  formatVnd,
   resetSandboxApi,
   rollbackPolicyRule,
   runAiInvestigation,
   triggerSimulation,
 } from "@/lib/api";
 
-type RightTab = "policy" | "diff" | "api";
+type RightTab = "policy" | "report" | "diff" | "api";
 
 const SEVERITY_STYLES: Record<string, string> = {
   CRITICAL:
@@ -487,43 +489,7 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/rollback" \\
           {/* Live Wallets + Last HTTP Response Status Strip */}
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-3 pt-1">
             {/* 5 Wallets Live Balance */}
-            <div className="xl:col-span-7 grid grid-cols-2 sm:grid-cols-5 gap-2">
-              {(state?.wallets || []).map((w) => {
-                const isNegative = w.balance < 0;
-                const isInflated = w.balance > 12_000_000;
-                const cardStyle = isNegative
-                  ? "border-rose-500/70 bg-rose-500/15"
-                  : isInflated
-                  ? "border-amber-500/70 bg-amber-500/15"
-                  : "border-slate-800 bg-[#090f1d]";
-
-                return (
-                  <div
-                    key={w.id}
-                    className={`rounded-xl border px-3 py-2 transition ${cardStyle}`}
-                  >
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="font-mono font-bold text-slate-200 flex items-center gap-1">
-                        <WalletIcon className="h-3 w-3 text-sky-400" />
-                        {w.id}
-                      </span>
-                      <span className="text-slate-500 font-mono">{w.owner_id}</span>
-                    </div>
-                    <div
-                      className={`mt-1 font-mono text-xs font-bold ${
-                        isNegative
-                          ? "text-rose-300"
-                          : isInflated
-                          ? "text-amber-300"
-                          : "text-emerald-300"
-                      }`}
-                    >
-                      {formatVnd(w.balance)}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <WalletMonitorGrid wallets={state?.wallets || []} />
 
             {/* Last Traffic Burst Result (200 OK vs 403/429 Blocked) */}
             <div className="xl:col-span-5 rounded-xl border border-slate-800 bg-[#090f1d] px-3 py-2 flex flex-col justify-center">
@@ -767,61 +733,7 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/rollback" \\
             </div>
 
             {/* Live Non-Baseline HTTP Log Feed */}
-            <div className="rounded-2xl border border-slate-800 bg-[#0d1424]/95 p-4 shadow-xl space-y-2.5">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                  <Activity className="h-3.5 w-3.5 text-sky-400" />
-                  Live Sandbox HTTP Logs (Mới nhất từ DB)
-                </h3>
-                <span className="text-[11px] text-slate-500">
-                  {state?.recent_logs.length ?? 0} live events
-                </span>
-              </div>
-              <div className="max-h-56 overflow-y-auto rounded-xl border border-slate-800 bg-[#070b14]">
-                {!state?.recent_logs.length ? (
-                  <div className="p-4 text-center text-xs text-slate-500">
-                    Chưa có log live (300 dòng clean baseline vẫn được giữ sẵn cho Dry-Run).
-                  </div>
-                ) : (
-                  <table className="w-full text-left font-mono text-[11px]">
-                    <thead className="sticky top-0 bg-slate-900/95 text-slate-400 border-b border-slate-800">
-                      <tr>
-                        <th className="px-2.5 py-1.5">HTTP</th>
-                        <th className="px-2.5 py-1.5">Endpoint</th>
-                        <th className="px-2.5 py-1.5">IP</th>
-                        <th className="px-2.5 py-1.5">Actor / Key</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/60">
-                      {state.recent_logs.slice(0, 15).map((log) => (
-                        <tr key={log.id} className="hover:bg-slate-900/50">
-                          <td className="px-2.5 py-1.5 whitespace-nowrap">
-                            <span
-                              className={`rounded px-1.5 py-0.5 font-bold ${
-                                log.status_code >= 400
-                                  ? "bg-rose-500/20 text-rose-300"
-                                  : "bg-emerald-500/20 text-emerald-300"
-                              }`}
-                            >
-                              {log.status_code}
-                            </span>
-                          </td>
-                          <td className="px-2.5 py-1.5 text-slate-200 truncate max-w-[200px]">
-                            {log.method} {log.path}
-                          </td>
-                          <td className="px-2.5 py-1.5 text-sky-300 whitespace-nowrap">
-                            {log.ip_address}
-                          </td>
-                          <td className="px-2.5 py-1.5 text-slate-400 truncate max-w-[130px]">
-                            {log.api_key_id || log.actor_id || "-"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </div>
+            <LiveLogsPanel logs={state?.recent_logs || []} />
           </section>
 
           {/* =============================================================== */}
@@ -927,40 +839,51 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/rollback" \\
                 )}
               </div>
 
-              {/* 3 TABS: Virtual Patch Policy | Hotfix Code Diff | Raw API & cURL */}
-              <div className="flex items-center gap-1 rounded-xl border border-slate-800 bg-[#070b14] p-1 text-xs">
+              {/* 4 TABS: Virtual Patch Policy | SOC Report & Export | Hotfix Code Diff | Raw API & cURL */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 rounded-xl border border-slate-800 bg-[#070b14] p-1 text-xs">
                 <button
                   onClick={() => setActiveTab("policy")}
-                  className={`flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 font-semibold transition ${
+                  className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 font-semibold transition ${
                     activeTab === "policy"
                       ? "bg-sky-500/20 text-sky-200 border border-sky-500/40"
                       : "text-slate-400 hover:text-slate-200"
                   }`}
                 >
                   <ShieldCheck className="h-3.5 w-3.5" />
-                  1. Virtual Patch Policy
+                  1. Virtual Patch
+                </button>
+                <button
+                  onClick={() => setActiveTab("report")}
+                  className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 font-semibold transition ${
+                    activeTab === "report"
+                      ? "bg-sky-500/20 text-sky-200 border border-sky-500/40"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  2. Báo cáo SOC
                 </button>
                 <button
                   onClick={() => setActiveTab("diff")}
-                  className={`flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 font-semibold transition ${
+                  className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 font-semibold transition ${
                     activeTab === "diff"
                       ? "bg-sky-500/20 text-sky-200 border border-sky-500/40"
                       : "text-slate-400 hover:text-slate-200"
                   }`}
                 >
                   <Code2 className="h-3.5 w-3.5" />
-                  2. Hotfix Code Diff
+                  3. Hotfix Diff
                 </button>
                 <button
                   onClick={() => setActiveTab("api")}
-                  className={`flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 font-semibold transition ${
+                  className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 font-semibold transition ${
                     activeTab === "api"
                       ? "bg-sky-500/20 text-sky-200 border border-sky-500/40"
                       : "text-slate-400 hover:text-slate-200"
                   }`}
                 >
                   <Terminal className="h-3.5 w-3.5" />
-                  3. Raw API &amp; cURL
+                  4. API &amp; cURL
                 </button>
               </div>
 
@@ -1036,7 +959,16 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/rollback" \\
                 </div>
               )}
 
-              {/* TAB 2: HOTFIX CODE DIFF */}
+              {/* TAB 2: SOC EXECUTIVE & TECHNICAL REPORT + EXPORT */}
+              {activeTab === "report" && (
+                <IncidentAnalysisReport
+                  incident={activeIncident}
+                  onNotify={showToast}
+                  onError={setErrorMsg}
+                />
+              )}
+
+              {/* TAB 3: HOTFIX CODE DIFF */}
               {activeTab === "diff" && (
                 <div className="space-y-3">
                   {!activeIncident?.hotfix_diff ? (

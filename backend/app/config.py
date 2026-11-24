@@ -3,9 +3,10 @@ from functools import lru_cache
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load backend/.env if present
+# Load backend/.env if present (skipped when FINSEC_SKIP_DOTENV=1 in isolated tests)
 _ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
-load_dotenv(dotenv_path=_ENV_PATH)
+if os.getenv("FINSEC_SKIP_DOTENV", "").strip().lower() not in ("1", "true", "yes"):
+    load_dotenv(dotenv_path=_ENV_PATH)
 
 
 class Settings:
@@ -32,6 +33,12 @@ class Settings:
         # LLM Configuration
         self.gemini_api_key: str = os.getenv("GEMINI_API_KEY", "").strip()
         self.gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip()
+        self.gemini_timeout_seconds: float = float(
+            os.getenv("GEMINI_TIMEOUT_SECONDS", "15")
+        )
+        self.gemini_total_budget_seconds: float = float(
+            os.getenv("GEMINI_TOTAL_BUDGET_SECONDS", "40")
+        )
         self.openai_api_key: str = os.getenv("OPENAI_API_KEY", "").strip()
         self.openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
 

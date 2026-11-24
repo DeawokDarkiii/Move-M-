@@ -77,6 +77,37 @@ export interface PromptInjectionEvidence {
   excerpt: string;
 }
 
+export interface ExecutiveSummaryAnalysis {
+  headline: string;
+  category_vi: string;
+  severity: string;
+  status: string;
+  what_happened: string;
+  plain_language_analogy: string;
+  business_impact: string;
+  protection_status: string;
+  blast_radius_verdict: string;
+  prompt_injection_warning: string;
+}
+
+export interface TechnicalDeepDiveAnalysis {
+  owasp_api_top_10: string;
+  cwe_mapping: string;
+  mitre_attack: string;
+  cvss_v31_estimate: string;
+  condition_type: string;
+  root_cause_analysis: string;
+  virtual_patch_mechanism: string;
+  remediation_checklist: string[];
+  engine_used: string;
+}
+
+export interface StructuredIncidentAnalysis {
+  generated_at: string;
+  executive_summary: ExecutiveSummaryAnalysis;
+  technical_analysis: TechnicalDeepDiveAnalysis;
+}
+
 export interface IncidentReport {
   id: string;
   title: string;
@@ -93,6 +124,7 @@ export interface IncidentReport {
   prompt_injection_evidence?: PromptInjectionEvidence[];
   engine_used?: string;
   created_at?: string;
+  structured_analysis?: StructuredIncidentAnalysis;
 }
 
 export interface SandboxState {
@@ -234,6 +266,39 @@ export function resetSandboxApi(
   active_rules_cleared: boolean;
 }> {
   return apiFetch("/v1/sandbox/reset", { method: "POST" }, baseUrl);
+}
+
+export async function fetchIncidentExport(
+  incidentId: string,
+  format: "markdown" | "html" | "json",
+  baseUrl: string = API_BASE_URL
+): Promise<{ content: string; filename: string; mimeType: string }> {
+  const res = await fetch(
+    `${baseUrl}/v1/incidents/${encodeURIComponent(incidentId)}/export?format=${format}`,
+    {
+      method: "GET",
+      headers: {
+        "X-API-Key": DEMO_API_KEY,
+      },
+      cache: "no-store",
+    }
+  );
+  if (!res.ok) {
+    throw new Error(`Export failed (HTTP ${res.status})`);
+  }
+  const content = await res.text();
+  const ext = format === "markdown" ? "md" : format;
+  const mimeType =
+    format === "markdown"
+      ? "text/markdown;charset=utf-8"
+      : format === "html"
+      ? "text/html;charset=utf-8"
+      : "application/json;charset=utf-8";
+  return {
+    content,
+    filename: `finsec-report-${incidentId}.${ext}`,
+    mimeType,
+  };
 }
 
 export function formatVnd(amount: number): string {
