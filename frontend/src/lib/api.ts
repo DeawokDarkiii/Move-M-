@@ -301,6 +301,186 @@ export async function fetchIncidentExport(
   };
 }
 
+export interface ScenarioCatalogItem {
+  id: string;
+  name: string;
+  context: string;
+  context_code?: string;
+  channel?: string;
+  category: "single_vector" | "multi_vector" | "red_team_blitz" | string;
+  scale_tier: string;
+  scale_label?: string;
+  total_transactions: number;
+  attack_ratio_pct?: number;
+  estimated_attacks?: number;
+  vectors: string[];
+  with_prompt_injection: boolean;
+  severity?: string;
+  target_wallets?: string[];
+  description?: string;
+}
+
+export interface ScenarioCatalogResponse {
+  total_catalog: number;
+  total_filtered: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  items: ScenarioCatalogItem[];
+}
+
+export interface VectorBreakdownItem {
+  vector: string;
+  label: string;
+  owasp: string;
+  endpoint: string;
+  condition_type: string;
+  attempts: number;
+  succeeded_without_ai: number;
+  blocked_by_ai_live: number;
+  leaked_live: number;
+  blocked_by_ai_full: number;
+  loss_without_ai_vnd: number;
+  loss_with_ai_live_vnd: number;
+  loss_prevented_full_vnd: number;
+  rule_currently_active: boolean;
+  block_http_code: number;
+}
+
+export interface AccountComparisonItem {
+  wallet_id: string;
+  owner_id: string;
+  baseline_balance: number;
+  without_ai_balance: number;
+  without_ai_delta: number;
+  without_ai_attacks_hit: number;
+  without_ai_records_leaked: number;
+  without_ai_status: "SAFE" | "DRAINED" | "INFLATED" | "DATA_LEAKED" | "COMPROMISED";
+  with_ai_live_balance: number;
+  with_ai_live_delta: number;
+  with_ai_live_blocked: number;
+  with_ai_live_leaked_hits: number;
+  with_ai_live_status: "PROTECTED" | "AT_RISK";
+  with_ai_full_balance: number;
+  with_ai_full_blocked: number;
+  with_ai_full_status: "PROTECTED";
+  targeted_vectors: string[];
+}
+
+export interface ScaleSimulationResponse {
+  scenario: ScenarioCatalogItem;
+  simulation_time_ms: number;
+  total_transactions: number;
+  clean_transactions: number;
+  attack_transactions: number;
+  attack_ratio_pct: number;
+  with_prompt_injection: boolean;
+  active_rules_count: number;
+  active_condition_types: string[];
+  without_ai: {
+    attacks_succeeded: number;
+    attacks_blocked: number;
+    block_rate_pct: number;
+    financial_loss_vnd: number;
+    compromised_accounts: number;
+    records_leaked: number;
+    prompt_injection_status: string;
+  };
+  with_ai_live: {
+    attacks_blocked: number;
+    attacks_leaked: number;
+    block_rate_pct: number;
+    financial_loss_vnd: number;
+    financial_saved_vnd: number;
+    compromised_accounts: number;
+    records_leaked: number;
+    clean_transactions_preserved: number;
+    false_positives: number;
+    false_positive_rate_pct: number;
+    avg_middleware_latency_ms: number;
+    prompt_injection_status: string;
+  };
+  with_ai_full_shield: {
+    attacks_blocked: number;
+    attacks_leaked: number;
+    block_rate_pct: number;
+    financial_loss_vnd: number;
+    financial_saved_vnd: number;
+    compromised_accounts: number;
+    records_leaked: number;
+    clean_transactions_preserved: number;
+    false_positives: number;
+    false_positive_rate_pct: number;
+    avg_middleware_latency_ms: number;
+    prompt_injection_status: string;
+  };
+  vector_breakdown: VectorBreakdownItem[];
+  accounts_comparison: AccountComparisonItem[];
+}
+
+export function fetchScenarioCatalog(
+  params: {
+    q?: string;
+    category?: string;
+    scale_tier?: string;
+    vector?: string;
+    page?: number;
+    page_size?: number;
+  } = {},
+  baseUrl?: string
+): Promise<ScenarioCatalogResponse> {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set("q", params.q);
+  if (params.category) qs.set("category", params.category);
+  if (params.scale_tier) qs.set("scale_tier", params.scale_tier);
+  if (params.vector) qs.set("vector", params.vector);
+  qs.set("page", String(params.page ?? 1));
+  qs.set("page_size", String(params.page_size ?? 18));
+  return apiFetch<ScenarioCatalogResponse>(
+    `/v1/scenarios/catalog?${qs.toString()}`,
+    { method: "GET" },
+    baseUrl
+  );
+}
+
+export function runScaleSimulationApi(
+  payload: {
+    scenario_id?: string;
+    total_transactions?: number;
+    vectors?: string[];
+    attack_ratio_pct?: number;
+    with_prompt_injection?: boolean;
+  } = {},
+  baseUrl?: string
+): Promise<ScaleSimulationResponse> {
+  return apiFetch<ScaleSimulationResponse>(
+    "/v1/sandbox/simulate-scale",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    baseUrl
+  );
+}
+
+export function toggleAiShieldApi(
+  enabled: boolean,
+  baseUrl?: string
+): Promise<{
+  ai_shield_enabled: boolean;
+  active_rules_count: number;
+  message: string;
+}> {
+  return apiFetch(
+    "/v1/policies/ai-shield/toggle",
+    {
+      method: "POST",
+      body: JSON.stringify({ enabled }),
+    },
+    baseUrl
+  );
+}
+
 export function formatVnd(amount: number): string {
   return new Intl.NumberFormat("vi-VN").format(amount) + "₫";
 }

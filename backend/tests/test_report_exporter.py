@@ -13,7 +13,7 @@ os.environ["FINSEC_SKIP_DOTENV"] = "1"
 os.environ["SUPABASE_URL"] = ""
 os.environ["SUPABASE_KEY"] = ""
 os.environ["GEMINI_API_KEY"] = ""
-os.environ["SQLITE_DB_PATH"] = str(Path(__file__).resolve().parent / "test_report_exporter.db")
+os.environ.setdefault("SQLITE_DB_PATH", str(Path(__file__).resolve().parent / "test_finsec.db"))
 os.environ["FINSEC_API_KEY"] = "finsec-demo-key-2026"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))

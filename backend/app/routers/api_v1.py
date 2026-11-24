@@ -41,6 +41,11 @@ from app.policy.engine import (
     invalidate_policy_cache,
     reset_concurrency_state,
 )
+from app.sandbox.scenario_engine import (
+    RECOMMENDED_AI_SHIELD_RULES,
+    query_scenario_catalog,
+    run_scale_simulation,
+)
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -556,4 +561,129 @@ async def simulate_traffic(
         "blocked_count": blocked_count,
         "results": results,
         "wallets": db.get_wallets(),
+    }
+
+
+# ------------------------------------------------------------------
+# 5. 900-Scenario Catalog, High-Volume A/B Simulation & AI Shield Toggle
+# ------------------------------------------------------------------
+class ScaleSimulateRequest(BaseModel):
+    scenario_id: Optional[str] = Field(
+        default=None,
+        description="Scenario ID from SCN-0001..SCN-0900, 'random', or omit for custom run",
+    )
+    total_transactions: Optional[int] = Field(
+        default=None,
+        ge=1000,
+        le=100000,
+        description="Override total transaction volume (1,000 – 100,000)",
+    )
+    vectors: Optional[list[str]] = Field(
+        default=None,
+        description="Optional list of attack vectors to combine simultaneously",
+    )
+    attack_ratio_pct: Optional[float] = Field(
+        default=None,
+        ge=0.2,
+        le=25.0,
+        description="Optional percentage of malicious traffic mixed into clean volume",
+    )
+    with_prompt_injection: Optional[bool] = Field(
+        default=None,
+        description="Whether to inject Indirect Prompt Injection payloads",
+    )
+
+
+class AiShieldToggleRequest(BaseModel):
+    enabled: bool = Field(
+        description="True = activate all 4 FinSec AI Shield rules in Live Middleware; False = roll back all active rules",
+    )
+
+
+@router.get(
+    "/scenarios/catalog",
+    summary="Query & Filter 900 Realistic Fintech SOC Security Scenarios",
+)
+@limiter.limit("120/minute")
+async def list_scenarios_catalog(
+    request: Request,
+    q: str = Query(default="", description="Keyword search across ID, title, context"),
+    category: str = Query(default="", description="single_vector | multi_vector | red_team_blitz"),
+    scale_tier: str = Query(default="", description="standard | high | peak | surge | mega"),
+    vector: str = Query(default="", description="webhook_replay | bola_idor | leaked_key | race_condition | prompt_injection"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=24, ge=1, le=100),
+    _api_key: str = Depends(verify_api_key),
+) -> dict[str, Any]:
+    return query_scenario_catalog(
+        q=q,
+        category=category,
+        scale_tier=scale_tier,
+        vector=vector,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.post(
+    "/sandbox/simulate-scale",
+    summary="Execute High-Volume (1k–100k tx) Multi-Vector Simulation with A/B AI Protection Comparison",
+)
+@limiter.limit("60/minute")
+async def simulate_scale_traffic(
+    request: Request,
+    payload: Optional[ScaleSimulateRequest] = None,
+    _api_key: str = Depends(verify_api_key),
+) -> dict[str, Any]:
+    req = payload or ScaleSimulateRequest()
+    return await asyncio.to_thread(
+        run_scale_simulation,
+        scenario_id=req.scenario_id,
+        total_transactions=req.total_transactions,
+        vectors=req.vectors,
+        attack_ratio_pct=req.attack_ratio_pct,
+        with_prompt_injection=req.with_prompt_injection,
+        persist_sample_logs=True,
+    )
+
+
+@router.post(
+    "/policies/ai-shield/toggle",
+    summary="1-Click Toggle Full FinSec AI Shield (ON = 4 Core Virtual Patches ACTIVE, OFF = Unprotected)",
+)
+@limiter.limit("60/minute")
+async def toggle_ai_shield(
+    request: Request,
+    payload: AiShieldToggleRequest,
+    _api_key: str = Depends(verify_api_key),
+) -> dict[str, Any]:
+    existing_rules = db.list_policy_rules()
+    if payload.enabled:
+        for rdef in RECOMMENDED_AI_SHIELD_RULES:
+            db.upsert_policy_rule(
+                {
+                    "id": rdef["id"],
+                    "name": rdef["name"],
+                    "status": "ACTIVE",
+                    "rule_spec": rdef["rule_spec"],
+                }
+            )
+        invalidate_policy_cache()
+        reset_concurrency_state()
+        return {
+            "ai_shield_enabled": True,
+            "active_rules_count": len([r for r in db.list_policy_rules() if r["status"] == "ACTIVE"]),
+            "message": "Đã BẬT Lá chắn FinSec AI (4 luật Virtual Patch đang bảo vệ trực tiếp Middleware <5ms).",
+        }
+
+    # Disable all active rules
+    for r in existing_rules:
+        if r["status"] == "ACTIVE":
+            db.update_policy_rule_status(r["id"], "ROLLED_BACK")
+    invalidate_policy_cache()
+    reset_concurrency_state()
+    return {
+        "ai_shield_enabled": False,
+        "active_rules_count": 0,
+        "message": "Đã TẮT toàn bộ luật bảo vệ AI (Hệ thống đang ở trạng thái KHÔNG CÓ AI BẢO VỆ).",
     }

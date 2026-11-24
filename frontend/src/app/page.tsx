@@ -4,7 +4,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   AlertOctagon,
-  AlertTriangle,
   CheckCircle2,
   Code2,
   Copy,
@@ -12,39 +11,39 @@ import {
   Database,
   ExternalLink,
   FileText,
-  Flame,
-  KeyRound,
-  Lock,
-  Play,
+  Layers,
   RefreshCw,
   RotateCcw,
   ShieldAlert,
   ShieldCheck,
   ShieldOff,
   Terminal,
-  UserCheck,
-  Zap,
 } from "lucide-react";
 
+import { AiComparisonOverview } from "@/components/AiComparisonOverview";
 import { DiffViewer } from "@/components/DiffViewer";
 import { IncidentAnalysisReport } from "@/components/IncidentAnalysisReport";
-import { LiveLogsPanel } from "@/components/LiveLogsPanel";
-import { WalletMonitorGrid } from "@/components/WalletMonitorGrid";
+import { LiveTelemetryRulesView } from "@/components/LiveTelemetryRulesView";
+import { ScenarioCatalogExplorer } from "@/components/ScenarioCatalogExplorer";
 import {
   API_BASE_URL,
   DEMO_API_KEY,
   IncidentReport,
   PolicyRule,
   SandboxState,
+  ScaleSimulationResponse,
   SimulationResponse,
   enforcePolicyRule,
   fetchSandboxState,
   resetSandboxApi,
   rollbackPolicyRule,
   runAiInvestigation,
+  runScaleSimulationApi,
+  toggleAiShieldApi,
   triggerSimulation,
 } from "@/lib/api";
 
+type WorkspaceView = "overview" | "scenarios" | "investigation" | "telemetry";
 type RightTab = "policy" | "report" | "diff" | "api";
 
 const SEVERITY_STYLES: Record<string, string> = {
@@ -56,11 +55,12 @@ const SEVERITY_STYLES: Record<string, string> = {
 };
 
 export default function FinSecWorkspacePage() {
+  const [view, setView] = useState<WorkspaceView>("overview");
   const [state, setState] = useState<SandboxState | null>(null);
+  const [scaleResult, setScaleResult] = useState<ScaleSimulationResponse | null>(null);
   const [activeIncident, setActiveIncident] = useState<IncidentReport | null>(null);
   const [visibleStepsCount, setVisibleStepsCount] = useState<number>(0);
   const [lastSim, setLastSim] = useState<SimulationResponse | null>(null);
-  const [withPromptInjection, setWithPromptInjection] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<RightTab>("policy");
 
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
@@ -87,16 +87,7 @@ export default function FinSecWorkspacePage() {
         }
         if (prev) {
           const updated = data.incidents.find((i) => i.id === prev.id);
-          if (updated) {
-            return {
-              ...prev,
-              ...updated,
-              summary: prev.summary,
-              prompt_injection_detected: prev.prompt_injection_detected,
-              prompt_injection_evidence: prev.prompt_injection_evidence,
-              engine_used: prev.engine_used,
-            };
-          }
+          return updated || prev;
         }
         return prev;
       });
@@ -104,7 +95,7 @@ export default function FinSecWorkspacePage() {
       setErrorMsg(
         err instanceof Error
           ? `Không thể kết nối Backend (${API_BASE_URL}): ${err.message}`
-          : "Không thể kết nối Backend"
+          : "Không thể kết nối Backend API"
       );
     }
   }, []);
@@ -113,7 +104,6 @@ export default function FinSecWorkspacePage() {
     refreshState();
   }, [refreshState]);
 
-  // Animate reasoning_trace steps sequentially whenever a new incident arrives
   useEffect(() => {
     if (!activeIncident?.reasoning_trace?.length) {
       setVisibleStepsCount(0);
@@ -121,14 +111,12 @@ export default function FinSecWorkspacePage() {
     }
     const total = activeIncident.reasoning_trace.length;
     if (visibleStepsCount >= total) return;
-
     const timer = setTimeout(() => {
       setVisibleStepsCount((c) => Math.min(c + 1, total));
-    }, 260);
+    }, 280);
     return () => clearTimeout(timer);
   }, [activeIncident, visibleStepsCount]);
 
-  // Find current live status of proposed rule from state.policy_rules
   const currentProposedRule: PolicyRule | null = useMemo(() => {
     if (!activeIncident?.proposed_rule) return null;
     const liveMatch = state?.policy_rules.find(
@@ -137,39 +125,89 @@ export default function FinSecWorkspacePage() {
     return liveMatch || activeIncident.proposed_rule;
   }, [activeIncident, state]);
 
-  const handleSimulate = async (
+  const handleRunScaleScenario = async (payload: {
+    scenario_id?: string;
+    total_transactions?: number;
+    vectors?: string[];
+    attack_ratio_pct?: number;
+    with_prompt_injection?: boolean;
+  }) => {
+    setLoadingAction("scale");
+    setErrorMsg(null);
+    try {
+      const res = await runScaleSimulationApi(payload);
+      setScaleResult(res);
+      setView("overview");
+      showToast(
+        `Đã mô phỏng ${res.total_transactions.toLocaleString("vi-VN")} giao dịch (${res.scenario.id}) trong ${res.simulation_time_ms}ms.`
+      );
+      await refreshState();
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Mô phỏng quy mô lớn thất bại");
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleToggleAiShield = async (enabled: boolean) => {
+    setLoadingAction("shield");
+    setErrorMsg(null);
+    try {
+      const res = await toggleAiShieldApi(enabled);
+      showToast(res.message);
+      await refreshState();
+      // Automatically re-run current scenario so the user sees the instant Before/After shift!
+      if (scaleResult) {
+        const rerun = await runScaleSimulationApi({
+          scenario_id:
+            scaleResult.scenario.id !== "SCN-CUSTOM"
+              ? scaleResult.scenario.id
+              : undefined,
+          total_transactions: scaleResult.total_transactions,
+          vectors: scaleResult.scenario.vectors,
+          attack_ratio_pct: scaleResult.attack_ratio_pct,
+          with_prompt_injection: scaleResult.with_prompt_injection,
+        });
+        setScaleResult(rerun);
+      }
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Không thể bật/tắt Lá chắn AI");
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleSimulateClassic = async (
     scenario:
       | "webhook_replay"
       | "bola_idor"
       | "leaked_key"
       | "race_condition"
       | "prompt_injection"
-      | "normal_traffic",
-    label: string
+      | "normal_traffic"
   ) => {
-    setLoadingAction(`sim:${scenario}`);
+    setLoadingAction(scenario);
     setErrorMsg(null);
     try {
-      const inject = scenario === "prompt_injection" ? true : withPromptInjection;
+      const inject = scenario === "prompt_injection";
       const res = await triggerSimulation(scenario, inject);
       setLastSim(res);
-      await refreshState();
-
       if (scenario === "normal_traffic") {
         showToast(
-          `Giao dịch khách hàng sạch: ${res.succeeded_200}/${res.total_requests} trả về 200 OK (0 bị chặn nhầm).`
+          `Giao dịch khách thật: ${res.succeeded_200}/${res.total_requests} thành công 200 OK (0 chặn nhầm).`
         );
       } else if (res.blocked_count > 0 && res.succeeded_200 === 0) {
         showToast(
-          `Virtual Patch ĐÃ CHẶN THÀNH CÔNG ${res.blocked_count}/${res.total_requests} request của "${label}" (HTTP 403/429)!`
+          `VIRTUAL PATCH ĐÃ CHẶN: ${res.blocked_count}/${res.total_requests} request bị chặn 403/429 (<5ms).`
         );
       } else {
         showToast(
-          `Đã bắn "${label}": ${res.succeeded_200} request lọt qua (200 OK). Bấm "AI SOC Điều tra" để phân tích & vá ảo!`
+          `Đã bắn kịch bản ${scenario}: ${res.succeeded_200} lọt (200 OK), ${res.blocked_count} bị chặn.`
         );
       }
+      await refreshState();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Lỗi mô phỏng tấn công");
+      setErrorMsg(err instanceof Error ? err.message : "Lỗi mô phỏng HTTP");
     } finally {
       setLoadingAction(null);
     }
@@ -182,36 +220,33 @@ export default function FinSecWorkspacePage() {
       const report = await runAiInvestigation();
       setVisibleStepsCount(1);
       setActiveIncident(report);
-      setActiveTab("policy");
-      await refreshState();
+      setActiveTab("report");
+      setView("investigation");
       showToast(
         `AI SOC hoàn tất điều tra (${report.reasoning_trace.length} bước) & Dry-Run trên ${
           report.dry_run_report?.total_clean ?? 300
-        } log sạch!`
+        } giao dịch sạch.`
       );
+      await refreshState();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Lỗi AI SOC điều tra");
+      setErrorMsg(err instanceof Error ? err.message : "Lỗi điều tra AI SOC");
     } finally {
       setLoadingAction(null);
     }
   };
 
-  const handleEnforceOrRollback = async () => {
-    if (!currentProposedRule) return;
-    const isActive = currentProposedRule.status === "ACTIVE";
-    setLoadingAction(isActive ? "rollback" : "enforce");
+  const handleEnforceOrRollbackRule = async (rule: PolicyRule) => {
+    setLoadingAction("enforce");
     setErrorMsg(null);
     try {
-      if (isActive) {
-        const res = await rollbackPolicyRule(currentProposedRule.id);
-        showToast(res.message);
-      } else {
-        const res = await enforcePolicyRule(currentProposedRule.id);
-        showToast(res.message);
-      }
+      const res =
+        rule.status === "ACTIVE"
+          ? await rollbackPolicyRule(rule.id)
+          : await enforcePolicyRule(rule.id);
+      showToast(res.message);
       await refreshState();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Lỗi cập nhật Policy Rule");
+      setErrorMsg(err instanceof Error ? err.message : "Lỗi cập nhật luật Virtual Patch");
     } finally {
       setLoadingAction(null);
     }
@@ -223,14 +258,15 @@ export default function FinSecWorkspacePage() {
     try {
       const res = await resetSandboxApi();
       setActiveIncident(null);
+      setScaleResult(null);
       setLastSim(null);
       setVisibleStepsCount(0);
-      await refreshState();
       showToast(
-        `Đã Reset Sandbox sạch sẽ: khôi phục ${res.wallets_restored} ví (10.000.000₫) & giữ nguyên ${res.clean_baseline_preserved} dòng clean baseline.`
+        `Reset sạch thành công: khôi phục ${res.wallets_restored} ví & giữ nguyên ${res.clean_baseline_preserved} log sạch.`
       );
+      await refreshState();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Lỗi Reset Sandbox");
+      setErrorMsg(err instanceof Error ? err.message : "Reset Sandbox thất bại");
     } finally {
       setLoadingAction(null);
     }
@@ -242,813 +278,597 @@ export default function FinSecWorkspacePage() {
       setCopiedKey(key);
       setTimeout(() => setCopiedKey(null), 1800);
     } catch {
-      // ignore clipboard errors in restricted frames
+      showToast("Không thể copy tự động — hãy bôi đen và copy thủ công.");
     }
   };
 
   const curlSnippet = useMemo(() => {
     const ruleId = currentProposedRule?.id || "RULE-XXXXXXXX";
-    return `# 1. Đẩy log từ cổng thanh toán fintech vào FinSec Agent
-curl -X POST "${API_BASE_URL}/v1/logs/ingest" \\
+    return `# 1. Chạy mô phỏng quy mô lớn (Kho 900 kịch bản, 10k-60k giao dịch)
+curl -X POST "${API_BASE_URL}/v1/sandbox/simulate-scale" \\
   -H "Content-Type: application/json" \\
   -H "X-API-Key: ${DEMO_API_KEY}" \\
-  -d '{"logs":[{"method":"POST","path":"/sandbox/webhook/payment-success","status_code":200,"ip_address":"45.133.1.99","user_agent":"ReplayBot","request_body":{"event_id":"evt_replay_99881","wallet_id":"W_1001","amount":5000000}}]}'
+  -d '{"scenario_id": "random"}'
 
-# 2. Kích hoạt AI SOC Agent điều tra & Dry-Run kiểm chứng 0 chặn nhầm
+# 2. Kích hoạt AI SOC Agent điều tra ReAct + Dry-Run
 curl -X POST "${API_BASE_URL}/v1/incidents/investigate" \\
   -H "Content-Type: application/json" \\
   -H "X-API-Key: ${DEMO_API_KEY}" \\
   -d '{}'
 
-# 3. Kích hoạt Virtual Patch Rule trong Live Middleware (<5ms)
+# 3. Kích hoạt luật Virtual Patching trực tiếp trong Middleware (<5ms)
 curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/enforce" \\
-  -H "X-API-Key: ${DEMO_API_KEY}"
-
-# 4. Rollback luật chặn 1 chạm (hoặc Reset toàn bộ Sandbox)
-curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/rollback" \\
   -H "X-API-Key: ${DEMO_API_KEY}"`;
   }, [currentProposedRule]);
 
   const dryRun = activeIncident?.dry_run_report;
 
   return (
-    <div className="min-h-screen soc-grid-bg text-slate-100 flex flex-col">
-      {/* ================================================================= */}
-      {/* HEADER BAR                                                        */}
-      {/* ================================================================= */}
-      <header className="sticky top-0 z-30 border-b border-slate-800/90 bg-[#070b14]/90 backdrop-blur-md">
-        <div className="mx-auto max-w-[1600px] px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+    <div className="min-h-screen bg-[#070b14] text-slate-100">
+      {/* =================================================================== */}
+      {/* TOP SOC COMMAND HEADER                                              */}
+      {/* =================================================================== */}
+      <header className="sticky top-0 z-30 border-b border-slate-800/90 bg-[#090f1d]/95 backdrop-blur">
+        <div className="mx-auto max-w-[1520px] px-4 py-3 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500/25 to-indigo-600/25 border border-sky-400/40 shadow-[0_0_20px_rgba(56,189,248,0.18)]">
-              <ShieldCheck className="h-5 w-5 text-sky-400" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-500/15 border border-sky-500/40 text-sky-400">
+              <ShieldCheck className="h-5 w-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-base font-bold tracking-tight text-white">
-                  FinSec Agent
+                  FinSec Agent — AI SOC &amp; Virtual Patching Console
                 </h1>
-                <span className="rounded-full bg-sky-500/15 border border-sky-500/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-sky-300">
-                  AI SOC &amp; Virtual Patching
+                <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-300 border border-emerald-500/30">
+                  900 SCENARIOS · LIVE
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Nền tảng Điều tra Tự chủ &amp; Vá ảo Không Chặn Nhầm cho Vận hành Fintech
+                So sánh thực chiến Không AI vs Có AI · Điều tra ReAct · Dry-Run 0% chặn nhầm · Báo cáo SOC
               </p>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2 text-xs">
-            <div className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/70 px-2.5 py-1.5 text-slate-300">
-              <Database className="h-3.5 w-3.5 text-emerald-400" />
-              <span>
-                DB:{" "}
-                <strong className="text-white uppercase">
-                  {state?.db_mode || "..."}
-                </strong>
-              </span>
-              <span className="text-slate-600">|</span>
-              <span>
-                Baseline:{" "}
-                <strong className="text-emerald-300">
-                  {state?.clean_baseline_count ?? 300}
-                </strong>{" "}
-                sạch
+            <div className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/90 px-2.5 py-1.5">
+              <Database className="h-3.5 w-3.5 text-sky-400" />
+              <span className="text-slate-400">DB:</span>
+              <span className="font-mono font-semibold text-sky-300">
+                {state?.db_mode ?? "..."}
               </span>
             </div>
 
-            <div className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/70 px-2.5 py-1.5 text-slate-300">
-              <Lock className="h-3.5 w-3.5 text-sky-400" />
-              <span>
-                Active Rules:{" "}
-                <strong
-                  className={
-                    (state?.active_rules_count || 0) > 0
-                      ? "text-emerald-400"
-                      : "text-slate-400"
-                  }
-                >
-                  {state?.active_rules_count ?? 0}
-                </strong>
+            <div className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/90 px-2.5 py-1.5">
+              <Cpu className="h-3.5 w-3.5 text-violet-400" />
+              <span className="font-mono font-semibold text-violet-300">
+                {state?.llm_model ?? "loading"}
               </span>
             </div>
 
-            <button
-              onClick={handleResetSandbox}
-              disabled={loadingAction !== null}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-1.5 font-medium text-slate-200 hover:bg-slate-700/90 hover:border-slate-600 transition disabled:opacity-50"
+            <div
+              className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 font-semibold ${
+                (state?.active_rules_count ?? 0) > 0
+                  ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
+                  : "border-rose-500/40 bg-rose-500/15 text-rose-300"
+              }`}
             >
-              <RotateCcw
-                className={`h-3.5 w-3.5 ${
-                  loadingAction === "reset" ? "animate-spin" : ""
-                }`}
-              />
-              Reset Sandbox
-            </button>
+              <ShieldCheck className="h-3.5 w-3.5" />
+              <span>
+                {(state?.active_rules_count ?? 0) > 0
+                  ? `AI Shield: ${state?.active_rules_count} luật ACTIVE`
+                  : "AI Shield: OFF (0 luật)"}
+              </span>
+            </div>
 
             <a
               href={`${API_BASE_URL}/docs`}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/15 px-3 py-1.5 font-medium text-sky-300 hover:bg-sky-500/25 transition"
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1.5 font-medium text-slate-200 hover:border-sky-500/60 hover:text-sky-300 transition"
             >
-              <ExternalLink className="h-3.5 w-3.5" />
-              Swagger API Docs
+              Swagger
+              <ExternalLink className="h-3 w-3" />
             </a>
+
+            <button
+              onClick={handleResetSandbox}
+              disabled={loadingAction !== null}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 font-semibold text-amber-200 hover:bg-amber-500/20 disabled:opacity-50 transition"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Reset
+            </button>
           </div>
+        </div>
+
+        {/* Clean 4-Tab Primary SOC Navigation */}
+        <div className="mx-auto max-w-[1520px] px-4 pb-2.5">
+          <nav className="grid grid-cols-2 lg:grid-cols-4 gap-1.5 rounded-xl border border-slate-800 bg-[#060a12] p-1 text-xs">
+            <button
+              onClick={() => setView("overview")}
+              className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 font-bold transition ${
+                view === "overview"
+                  ? "bg-sky-500/20 text-sky-200 border border-sky-500/40 shadow"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <ShieldCheck className="h-4 w-4" />
+              1. So sánh AI vs Không AI
+            </button>
+            <button
+              onClick={() => setView("scenarios")}
+              className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 font-bold transition ${
+                view === "scenarios"
+                  ? "bg-indigo-500/20 text-indigo-200 border border-indigo-500/40 shadow"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <Layers className="h-4 w-4" />
+              2. Kho 900 Kịch bản (10k–100k GD)
+            </button>
+            <button
+              onClick={() => setView("investigation")}
+              className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 font-bold transition ${
+                view === "investigation"
+                  ? "bg-emerald-500/20 text-emerald-200 border border-emerald-500/40 shadow"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <Cpu className="h-4 w-4" />
+              3. Điều tra AI SOC &amp; Báo cáo
+              {activeIncident && (
+                <span className="rounded-full bg-emerald-500/25 px-1.5 py-0.5 text-[10px] font-mono">
+                  1
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setView("telemetry")}
+              className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 font-bold transition ${
+                view === "telemetry"
+                  ? "bg-amber-500/20 text-amber-200 border border-amber-500/40 shadow"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <Activity className="h-4 w-4" />
+              4. SIEM Logs &amp; Luật ({state?.recent_logs.length ?? 0})
+            </button>
+          </nav>
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-[1600px] flex-1 px-4 py-4 space-y-4">
-        {/* Notifications */}
+      <main className="mx-auto max-w-[1520px] px-4 py-5 space-y-4">
+        {/* Global Alerts / Toast */}
         {errorMsg && (
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-rose-500/50 bg-rose-500/15 px-4 py-2.5 text-xs text-rose-200">
-            <div className="flex items-center gap-2">
-              <AlertOctagon className="h-4 w-4 shrink-0 text-rose-400" />
-              <span>{errorMsg}</span>
-            </div>
-            <button
-              onClick={refreshState}
-              className="rounded bg-rose-500/25 px-2 py-1 text-[11px] font-medium hover:bg-rose-500/35"
-            >
-              Thử lại
-            </button>
+          <div className="flex items-center gap-2 rounded-xl border border-rose-500/50 bg-rose-500/15 px-4 py-3 text-sm text-rose-200">
+            <AlertOctagon className="h-4 w-4 shrink-0 text-rose-400" />
+            <span>{errorMsg}</span>
           </div>
         )}
-
         {toastMsg && (
-          <div className="flex items-center gap-2 rounded-xl border border-sky-500/40 bg-sky-500/15 px-4 py-2.5 text-xs text-sky-100 animate-step-in">
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-sky-400" />
+          <div className="flex items-center gap-2 rounded-xl border border-emerald-500/50 bg-emerald-500/15 px-4 py-2.5 text-sm text-emerald-200">
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
             <span>{toastMsg}</span>
           </div>
         )}
 
-        {/* ================================================================= */}
-        {/* REGION 1: TOP BAR — LIVE FINTECH ATTACK & TRAFFIC BAR             */}
-        {/* ================================================================= */}
-        <section className="rounded-2xl border border-slate-800 bg-[#0d1424]/95 p-4 shadow-xl space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Flame className="h-4 w-4 text-rose-400" />
-              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                Live Fintech Attack &amp; Traffic Bar
-              </h2>
-              <span className="text-[11px] text-slate-500">
-                (Bắn request HTTP thật qua Middleware Sandbox)
-              </span>
-            </div>
+        {/* VIEW 1: BEFORE / AFTER AI COMPARISON OVERVIEW */}
+        {view === "overview" && (
+          <AiComparisonOverview
+            scaleResult={scaleResult}
+            wallets={state?.wallets || []}
+            activeRulesCount={state?.active_rules_count ?? 0}
+            loadingAction={loadingAction}
+            onRunRandomScenario={() =>
+              handleRunScaleScenario({ scenario_id: "random" })
+            }
+            onToggleAiShield={handleToggleAiShield}
+            onInvestigate={handleInvestigate}
+            onOpenCatalog={() => setView("scenarios")}
+          />
+        )}
 
-            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-200 select-none">
-              <input
-                type="checkbox"
-                checked={withPromptInjection}
-                onChange={(e) => setWithPromptInjection(e.target.checked)}
-                className="h-3.5 w-3.5 rounded accent-amber-500"
-              />
-              <span>Gắn kèm Prompt Injection vào kịch bản 1–4</span>
-            </label>
-          </div>
+        {/* VIEW 2: 900-SCENARIO EXPLORER & CUSTOM SCALE RUNNER */}
+        {view === "scenarios" && (
+          <ScenarioCatalogExplorer
+            loadingAction={loadingAction}
+            onRunScenario={handleRunScaleScenario}
+          />
+        )}
 
-          {/* Attack & Normal Traffic Action Buttons */}
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => handleSimulate("webhook_replay", "1. Webhook Replay")}
-              disabled={loadingAction !== null}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/40 bg-rose-500/15 px-3 py-2 text-xs font-semibold text-rose-200 hover:bg-rose-500/25 transition disabled:opacity-50"
-            >
-              <Zap className="h-3.5 w-3.5 text-rose-400" />
-              1. Webhook Replay
-            </button>
-
-            <button
-              onClick={() => handleSimulate("bola_idor", "2. BOLA/IDOR Ví")}
-              disabled={loadingAction !== null}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-orange-500/40 bg-orange-500/15 px-3 py-2 text-xs font-semibold text-orange-200 hover:bg-orange-500/25 transition disabled:opacity-50"
-            >
-              <UserCheck className="h-3.5 w-3.5 text-orange-400" />
-              2. BOLA/IDOR Ví
-            </button>
-
-            <button
-              onClick={() => handleSimulate("leaked_key", "3. Lộ Internal Key")}
-              disabled={loadingAction !== null}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/15 px-3 py-2 text-xs font-semibold text-amber-200 hover:bg-amber-500/25 transition disabled:opacity-50"
-            >
-              <KeyRound className="h-3.5 w-3.5 text-amber-400" />
-              3. Lộ Internal Key
-            </button>
-
-            <button
-              onClick={() => handleSimulate("race_condition", "4. Race Condition")}
-              disabled={loadingAction !== null}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-fuchsia-500/40 bg-fuchsia-500/15 px-3 py-2 text-xs font-semibold text-fuchsia-200 hover:bg-fuchsia-500/25 transition disabled:opacity-50"
-            >
-              <Activity className="h-3.5 w-3.5 text-fuchsia-400" />
-              4. Race Condition
-            </button>
-
-            <button
-              onClick={() =>
-                handleSimulate("prompt_injection", "5. Prompt Injection qua Log")
-              }
-              disabled={loadingAction !== null}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/60 bg-red-600/20 px-3 py-2 text-xs font-semibold text-red-200 hover:bg-red-600/35 transition disabled:opacity-50"
-            >
-              <AlertTriangle className="h-3.5 w-3.5 text-red-400" />
-              5. Kèm Prompt Injection qua Log
-            </button>
-
-            <div className="h-6 w-px bg-slate-800 mx-1 hidden lg:block" />
-
-            <button
-              onClick={() =>
-                handleSimulate("normal_traffic", "Giao dịch khách hàng bình thường")
-              }
-              disabled={loadingAction !== null}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/50 bg-emerald-500/20 px-3.5 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/30 transition disabled:opacity-50"
-            >
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-              Gửi giao dịch khách hàng bình thường
-            </button>
-
-            <button
-              onClick={handleInvestigate}
-              disabled={loadingAction !== null}
-              className="ml-auto inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-sky-500 to-indigo-500 px-4 py-2 text-xs font-bold text-white shadow-[0_0_20px_rgba(56,189,248,0.3)] hover:from-sky-400 hover:to-indigo-400 transition disabled:opacity-50"
-            >
-              {loadingAction === "investigate" ? (
-                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Cpu className="h-3.5 w-3.5" />
-              )}
-              {loadingAction === "investigate"
-                ? "AI Agent đang điều tra..."
-                : "Chạy AI SOC Điều tra"}
-            </button>
-          </div>
-
-          {/* Live Wallets + Last HTTP Response Status Strip */}
-          <div className="grid grid-cols-1 xl:grid-cols-12 gap-3 pt-1">
-            {/* 5 Wallets Live Balance */}
-            <WalletMonitorGrid wallets={state?.wallets || []} />
-
-            {/* Last Traffic Burst Result (200 OK vs 403/429 Blocked) */}
-            <div className="xl:col-span-5 rounded-xl border border-slate-800 bg-[#090f1d] px-3 py-2 flex flex-col justify-center">
-              {!lastSim ? (
-                <div className="text-xs text-slate-500 flex items-center gap-2">
-                  <Play className="h-3.5 w-3.5 text-slate-600" />
-                  <span>
-                    Chưa gửi traffic. Bấm 1 trong 5 nút tấn công hoặc nút giao dịch sạch ở trên để kiểm thử Live Middleware.
-                  </span>
-                </div>
-              ) : (
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="font-semibold text-slate-300">
-                      Kết quả gần nhất:{" "}
-                      <span className="font-mono text-sky-300">
-                        {lastSim.scenario}
-                      </span>
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 font-mono text-emerald-300 border border-emerald-500/30">
-                        200 OK: {lastSim.succeeded_200}
-                      </span>
-                      <span className="rounded bg-rose-500/15 px-1.5 py-0.5 font-mono text-rose-300 border border-rose-500/30">
-                        403/429 Blocked: {lastSim.blocked_count}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {lastSim.results.map((r) => (
-                      <span
-                        key={r.seq}
-                        title={JSON.stringify(r.response)}
-                        className={`inline-flex items-center gap-1 rounded px-2 py-0.5 font-mono text-[10px] font-semibold border ${
-                          r.blocked
-                            ? "bg-rose-500/20 text-rose-200 border-rose-500/50"
-                            : r.status_code === 200
-                            ? "bg-emerald-500/20 text-emerald-200 border-emerald-500/50"
-                            : "bg-amber-500/20 text-amber-200 border-amber-500/50"
-                        }`}
-                      >
-                        #{r.seq} {r.method} {r.status_code}
-                        {r.blocked ? " BLOCKED" : " OK"}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </section>
-
-        {/* ================================================================= */}
-        {/* MAIN 2-COLUMN WORKSPACE                                           */}
-        {/* ================================================================= */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-          {/* =============================================================== */}
-          {/* REGION 2 (LEFT): AI AGENT LIVE INVESTIGATION TRACE              */}
-          {/* =============================================================== */}
-          <section className="lg:col-span-6 space-y-4">
-            <div className="rounded-2xl border border-slate-800 bg-[#0d1424]/95 p-4 shadow-xl space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
-                <div className="flex items-center gap-2">
-                  <Cpu className="h-4 w-4 text-sky-400" />
-                  <h2 className="text-sm font-bold text-white">
-                    Luồng điều tra của AI Agent (Live Investigation Trace)
-                  </h2>
-                </div>
-                {activeIncident && (
-                  <span className="font-mono text-[11px] text-slate-400">
-                    {activeIncident.id} ·{" "}
-                    <span className="text-sky-400">
-                      {activeIncident.engine_used || state?.llm_model}
-                    </span>
-                  </span>
-                )}
+        {/* VIEW 3: AI SOC INVESTIGATION, DRY-RUN & REPORT EXPORT */}
+        {view === "investigation" && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-800 bg-[#0d1424]/95 px-4 py-3">
+              <div>
+                <h2 className="text-sm font-bold text-white">
+                  Bàn làm việc Điều tra AI SOC (ReAct Loop · Dry-Run 300 Baseline · Xuất Báo cáo)
+                </h2>
+                <p className="text-xs text-slate-400">
+                  AI đọc log live trong DB, đối chiếu sổ cái ví, kiểm định bán kính ảnh hưởng (0% chặn nhầm) và đề xuất luật vá nóng + bản vá code.
+                </p>
               </div>
+              <button
+                onClick={handleInvestigate}
+                disabled={loadingAction !== null}
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-500 px-4 py-2 text-xs font-bold text-white shadow hover:from-sky-400 hover:to-indigo-400 disabled:opacity-50 transition"
+              >
+                {loadingAction === "investigate" ? (
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Cpu className="h-3.5 w-3.5" />
+                )}
+                {loadingAction === "investigate"
+                  ? "AI Agent đang điều tra..."
+                  : "Chạy AI SOC Điều tra mới"}
+              </button>
+            </div>
 
-              {!activeIncident ? (
-                <div className="rounded-xl border border-dashed border-slate-800 bg-[#090f1d]/70 p-8 text-center space-y-3">
-                  <ShieldAlert className="h-10 w-10 text-slate-600 mx-auto" />
-                  <div className="space-y-1">
-                    <p className="text-sm font-semibold text-slate-300">
-                      AI SOC Agent đang trực chiến
-                    </p>
-                    <p className="text-xs text-slate-500 max-w-md mx-auto">
-                      Hãy kích hoạt 1 kịch bản tấn công trên thanh trên cùng (ví dụ{" "}
-                      <span className="text-rose-300 font-mono">1. Webhook Replay</span>{" "}
-                      hoặc{" "}
-                      <span className="text-red-300 font-mono">
-                        5. Prompt Injection
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+              {/* LEFT: AI REASONING TRACE & TIMELINE */}
+              <section className="lg:col-span-5 space-y-4">
+                <div className="rounded-2xl border border-slate-800 bg-[#0d1424]/95 p-4 shadow-xl space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                    <div className="flex items-center gap-2">
+                      <Cpu className="h-4 w-4 text-sky-400" />
+                      <h3 className="text-sm font-bold text-white">
+                        Chuỗi Suy luận AI Agent (ReAct)
+                      </h3>
+                    </div>
+                    {activeIncident && (
+                      <span className="font-mono text-[11px] text-slate-400">
+                        {activeIncident.id}
                       </span>
-                      ), sau đó bấm{" "}
-                      <strong className="text-sky-300">Chạy AI SOC Điều tra</strong> để
-                      xem Agent tự gọi 4 công cụ DB và chạy Dry-Run.
-                    </p>
+                    )}
                   </div>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {/* CRITICAL RED BANNER FOR INDIRECT PROMPT INJECTION */}
-                  {activeIncident.prompt_injection_detected && (
-                    <div className="rounded-xl border-2 border-red-500 bg-red-950/60 p-3.5 shadow-[0_0_24px_rgba(239,68,68,0.3)] animate-pulse">
-                      <div className="flex items-start gap-2.5">
-                        <AlertOctagon className="h-5 w-5 text-red-400 shrink-0 mt-0.5" />
-                        <div className="space-y-1 text-xs">
-                          <div className="font-bold uppercase tracking-wider text-red-300">
-                            CẢNH BÁO CRITICAL: PHÁT HIỆN INDIRECT PROMPT INJECTION QUA LOG!
-                          </div>
-                          <p className="text-red-100/90 leading-relaxed">
-                            Kẻ tấn công đã nhúng mệnh lệnh giả mạo vào HTTP log nhằm đánh lừa AI SOC bỏ qua sự cố &amp; whitelist IP. Lớp{" "}
-                            <code className="rounded bg-red-900/80 px-1 py-0.5 font-mono text-red-200">
-                              sanitizer.py
-                            </code>{" "}
-                            đã phát hiện, cắt ngắn chuỗi độc hại và cô lập hoàn toàn trong thẻ{" "}
-                            <code className="rounded bg-red-900/80 px-1 py-0.5 font-mono text-red-200">
-                              &lt;UNTRUSTED_RAW_LOG_DATA&gt;
-                            </code>
-                            .
+
+                  {!activeIncident ? (
+                    <div className="rounded-xl border border-dashed border-slate-800 bg-[#090f1d] p-8 text-center space-y-2">
+                      <Cpu className="h-7 w-7 mx-auto text-slate-600" />
+                      <p className="text-sm font-medium text-slate-300">
+                        Chưa có báo cáo điều tra AI nào
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Chạy 1 kịch bản ở tab <strong>So sánh AI</strong> hoặc{" "}
+                        <strong>Kho 900 Kịch bản</strong>, rồi bấm{" "}
+                        <strong className="text-sky-300">Chạy AI SOC Điều tra mới</strong>.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3.5">
+                      <div className="rounded-xl border border-slate-800 bg-[#090f1d] p-3.5 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={`rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${
+                              SEVERITY_STYLES[activeIncident.severity] ||
+                              SEVERITY_STYLES.HIGH
+                            }`}
+                          >
+                            {activeIncident.severity}
+                          </span>
+                          <span className="rounded-full border border-slate-700 bg-slate-800/80 px-2.5 py-0.5 font-mono text-[11px] text-sky-300">
+                            {activeIncident.owasp_tag}
+                          </span>
+                        </div>
+                        <h4 className="text-sm font-bold text-white leading-snug">
+                          {activeIncident.title}
+                        </h4>
+                        {activeIncident.summary && (
+                          <p className="text-xs text-slate-300 leading-relaxed">
+                            {activeIncident.summary}
                           </p>
-                          {activeIncident.prompt_injection_evidence &&
-                            activeIncident.prompt_injection_evidence.length > 0 && (
-                              <div className="mt-1.5 rounded bg-black/40 border border-red-500/30 p-2 font-mono text-[11px] text-red-200 break-all">
-                                Patterns:{" "}
-                                {activeIncident.prompt_injection_evidence[0].patterns.join(
-                                  ", "
-                                )}{" "}
-                                | Excerpt: &quot;
-                                {activeIncident.prompt_injection_evidence[0].excerpt}
-                                &quot;
-                              </div>
-                            )}
+                        )}
+                        <div className="text-[11px] font-mono text-slate-400 pt-1">
+                          Engine: <span className="text-violet-300">{activeIncident.engine_used || "finsec-ai"}</span>
                         </div>
                       </div>
+
+                      {activeIncident.prompt_injection_detected && (
+                        <div className="rounded-xl border border-fuchsia-500/60 bg-fuchsia-950/35 p-3 space-y-1.5">
+                          <div className="flex items-center gap-2 text-xs font-bold text-fuchsia-200">
+                            <ShieldAlert className="h-4 w-4 text-fuchsia-400 shrink-0" />
+                            <span>
+                              PHÁT HIỆN &amp; VÔ HIỆU HÓA INDIRECT PROMPT INJECTION
+                            </span>
+                          </div>
+                          <p className="text-xs text-fuchsia-100/90 leading-relaxed">
+                            Lớp <code>sanitizer.py</code> đã cô lập chỉ thị giả mạo trong log vào thẻ{" "}
+                            <code>&lt;UNTRUSTED_RAW_LOG_DATA&gt;</code> — AI SOC miễn nhiễm hoàn toàn.
+                          </p>
+                        </div>
+                      )}
+
+                      <div className="space-y-2">
+                        <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                          ReAct Tool-Calling Trace ({visibleStepsCount}/{activeIncident.reasoning_trace.length} bước)
+                        </div>
+                        {activeIncident.reasoning_trace
+                          .slice(0, visibleStepsCount)
+                          .map((st) => (
+                            <div
+                              key={st.step}
+                              className="rounded-xl border border-slate-800/90 bg-[#090f1d] p-3"
+                            >
+                              <div className="flex items-center justify-between gap-2 text-xs">
+                                <span className="font-mono font-bold text-sky-300">
+                                  Bước {st.step}: {st.action}()
+                                </span>
+                                <span className="text-[10px] font-mono text-slate-500">
+                                  REAL DB TOOL
+                                </span>
+                              </div>
+                              <p className="mt-1 text-xs text-slate-200 leading-relaxed">
+                                {st.observation_summary}
+                              </p>
+                            </div>
+                          ))}
+                      </div>
+
+                      {activeIncident.attack_timeline.length > 0 && (
+                        <div className="space-y-1.5">
+                          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                            Attack Timeline ({activeIncident.attack_timeline.length} sự kiện)
+                          </div>
+                          <div className="max-h-44 overflow-y-auto space-y-1.5 pr-1">
+                            {activeIncident.attack_timeline.map((ev, i) => (
+                              <div
+                                key={i}
+                                className="flex items-start gap-2 rounded-lg border border-slate-800/80 bg-[#080d18] px-2.5 py-2 text-xs"
+                              >
+                                <span className="rounded bg-rose-500/20 px-1.5 py-0.5 font-mono text-[10px] font-bold text-rose-300 shrink-0">
+                                  {ev.stage}
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                  <div className="font-mono text-[11px] text-slate-200 truncate">
+                                    {ev.detail}
+                                  </div>
+                                  <div className="text-[10px] text-slate-500 font-mono">
+                                    IP: {ev.ip_address || "N/A"}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
+                </div>
+              </section>
 
-                  {/* Incident Header + OWASP API Top 10 Tag */}
-                  <div className="rounded-xl border border-slate-800 bg-[#090f1d] p-3.5 space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span
-                        className={`rounded-md border px-2 py-0.5 text-[11px] font-bold uppercase ${
-                          SEVERITY_STYLES[activeIncident.severity] ||
-                          SEVERITY_STYLES.HIGH
-                        }`}
-                      >
-                        {activeIncident.severity}
+              {/* RIGHT: DRY-RUN + 4 MITIGATION & REPORT TABS */}
+              <section className="lg:col-span-7 space-y-4">
+                <div className="rounded-2xl border border-slate-800 bg-[#0d1424]/95 p-4 shadow-xl space-y-4">
+                  {/* Dry-Run Blast Radius Summary */}
+                  <div
+                    className={`rounded-xl border p-3.5 space-y-2.5 ${
+                      dryRun
+                        ? dryRun.blocked_clean === 0
+                          ? "border-emerald-500/45 bg-gradient-to-br from-emerald-950/35 to-[#090f1d]"
+                          : "border-rose-500/50 bg-rose-950/30"
+                        : "border-slate-800 bg-[#090f1d]"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                        Kiểm định Dry-Run (Chạy thật trên {state?.clean_baseline_count ?? 300} giao dịch sạch)
                       </span>
-                      <span className="rounded-md border border-indigo-500/40 bg-indigo-500/15 px-2 py-0.5 font-mono text-[11px] text-indigo-200">
-                        {activeIncident.owasp_tag}
-                      </span>
-                      <span
-                        className={`ml-auto rounded-md border px-2 py-0.5 text-[11px] font-bold ${
-                          currentProposedRule?.status === "ACTIVE" ||
-                          activeIncident.status === "MITIGATED"
-                            ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
-                            : "border-rose-500/40 bg-rose-500/15 text-rose-300"
-                        }`}
-                      >
-                        {currentProposedRule?.status === "ACTIVE"
-                          ? "MITIGATED (VIRTUAL PATCH ACTIVE)"
-                          : activeIncident.status}
-                      </span>
+                      {dryRun && (
+                        <span
+                          className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+                            dryRun.blocked_clean === 0
+                              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                              : "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                          }`}
+                        >
+                          {dryRun.blocked_clean === 0
+                            ? "AN TOÀN — 0% CHẶN NHẦM"
+                            : "CẢNH BÁO CHẶN NHẦM"}
+                        </span>
+                      )}
                     </div>
-                    <h3 className="text-sm font-bold text-white">
-                      {activeIncident.title}
-                    </h3>
-                    {activeIncident.summary && (
-                      <p className="text-xs text-slate-300 leading-relaxed">
-                        {activeIncident.summary}
+
+                    {dryRun ? (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-lg border border-slate-800 bg-black/35 p-2.5">
+                          <div className="text-[11px] text-slate-400">Hiệu quả Chặn tấn công</div>
+                          <div className="mt-0.5 font-mono text-xl font-extrabold text-sky-300">
+                            {dryRun.attack_blocked_rate}%{" "}
+                            <span className="text-xs font-normal text-slate-400">
+                              ({dryRun.blocked_attack_logs}/{dryRun.total_attack_logs})
+                            </span>
+                          </div>
+                        </div>
+                        <div className="rounded-lg border border-slate-800 bg-black/35 p-2.5">
+                          <div className="text-[11px] text-slate-400">Chặn nhầm khách thật</div>
+                          <div
+                            className={`mt-0.5 font-mono text-xl font-extrabold ${
+                              dryRun.blocked_clean === 0
+                                ? "text-emerald-400"
+                                : "text-rose-400"
+                            }`}
+                          >
+                            {dryRun.blocked_clean} / {dryRun.total_clean}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500">
+                        Chạy AI SOC Điều tra để kiểm chứng luật phòng thủ trên 300 giao dịch sạch lịch sử.
                       </p>
                     )}
                   </div>
 
-                  {/* Step-by-step ReAct Tool Calling Trace */}
-                  <div className="space-y-2">
-                    <div className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                      ReAct Function Calling Trace ({visibleStepsCount}/
-                      {activeIncident.reasoning_trace.length} bước)
-                    </div>
-                    <div className="space-y-2">
-                      {activeIncident.reasoning_trace
-                        .slice(0, visibleStepsCount)
-                        .map((s) => (
-                          <div
-                            key={s.step}
-                            className="animate-step-in rounded-xl border border-slate-800 bg-[#090f1d] p-3 space-y-1.5"
-                          >
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div className="flex items-center gap-2">
-                                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-sky-500/20 border border-sky-500/40 font-mono text-[10px] font-bold text-sky-300">
-                                  {s.step}
-                                </span>
-                                <span className="font-mono text-xs font-bold text-sky-300">
-                                  {s.action}()
-                                </span>
-                              </div>
-                              <code className="rounded bg-slate-900 px-2 py-0.5 font-mono text-[10px] text-slate-400 max-w-full truncate">
-                                {JSON.stringify(s.args)}
-                              </code>
-                            </div>
-                            <p className="text-xs text-slate-300 pl-7 leading-relaxed">
-                              {s.observation_summary}
-                            </p>
-                          </div>
-                        ))}
-                    </div>
-                  </div>
-
-                  {/* Attack Kill Chain Timeline */}
-                  {activeIncident.attack_timeline?.length > 0 && (
-                    <div className="space-y-2">
-                      <div className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                        Attack Kill Chain Timeline
-                      </div>
-                      <div className="rounded-xl border border-slate-800 bg-[#090f1d] p-3 space-y-2">
-                        {activeIncident.attack_timeline.slice(0, 6).map((ev, idx) => (
-                          <div
-                            key={idx}
-                            className="flex items-start gap-2.5 text-xs border-l-2 border-rose-500/40 pl-3 py-0.5"
-                          >
-                            <span className="rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-rose-300 shrink-0">
-                              {ev.stage}
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <div className="font-mono text-[11px] text-slate-200 truncate">
-                                {ev.detail}
-                              </div>
-                              <div className="text-[10px] text-slate-500 font-mono">
-                                IP: {ev.ip_address || "N/A"} ·{" "}
-                                {ev.timestamp.slice(11, 19)} UTC
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Live Non-Baseline HTTP Log Feed */}
-            <LiveLogsPanel logs={state?.recent_logs || []} />
-          </section>
-
-          {/* =============================================================== */}
-          {/* REGION 3 (RIGHT): HUMAN-IN-THE-LOOP MITIGATION & DRY-RUN        */}
-          {/* =============================================================== */}
-          <section className="lg:col-span-6 space-y-4">
-            <div className="rounded-2xl border border-slate-800 bg-[#0d1424]/95 p-4 shadow-xl space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className="h-4 w-4 text-emerald-400" />
-                  <h2 className="text-sm font-bold text-white">
-                    Phản ứng &amp; Kiểm định An toàn (Human-in-the-Loop Mitigation)
-                  </h2>
-                </div>
-                {currentProposedRule && (
-                  <span
-                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold border ${
-                      currentProposedRule.status === "ACTIVE"
-                        ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
-                        : currentProposedRule.status === "ROLLED_BACK"
-                        ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
-                        : "bg-slate-800 text-slate-300 border-slate-700"
-                    }`}
-                  >
-                    RULE: {currentProposedRule.status}
-                  </span>
-                )}
-              </div>
-
-              {/* PROMINENT DRY-RUN BLAST RADIUS CARD */}
-              <div
-                className={`rounded-xl border p-4 space-y-3 ${
-                  dryRun
-                    ? dryRun.blocked_clean === 0
-                      ? "border-emerald-500/45 bg-gradient-to-br from-emerald-950/40 to-[#090f1d]"
-                      : "border-rose-500/50 bg-rose-950/30"
-                    : "border-slate-800 bg-[#090f1d]"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                    Kết quả Kiểm định Dry-Run (Chạy thật trên DB Baseline)
-                  </span>
-                  {dryRun && (
-                    <span
-                      className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
-                        dryRun.blocked_clean === 0
-                          ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
-                          : "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                  {/* 4 Sub-Tabs */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 rounded-xl border border-slate-800 bg-[#070b14] p-1 text-xs">
+                    <button
+                      onClick={() => setActiveTab("report")}
+                      className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 font-semibold transition ${
+                        activeTab === "report"
+                          ? "bg-sky-500/20 text-sky-200 border border-sky-500/40"
+                          : "text-slate-400 hover:text-slate-200"
                       }`}
                     >
-                      {dryRun.blocked_clean === 0
-                        ? "AN TOÀN — 0% CHẶN NHẦM"
-                        : "CẢNH BÁO CHẶN NHẦM"}
-                    </span>
-                  )}
-                </div>
-
-                {!dryRun ? (
-                  <p className="text-xs text-slate-500">
-                    Chưa có báo cáo Dry-Run. Khi AI Agent điều tra sự cố, luật phòng thủ sẽ được chạy mô phỏng trên toàn bộ{" "}
-                    <strong className="text-slate-300">
-                      {state?.clean_baseline_count ?? 300} giao dịch hợp lệ lịch sử
-                    </strong>{" "}
-                    trước khi trình duyệt.
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="rounded-lg border border-slate-800 bg-black/35 p-3">
-                      <div className="text-[11px] text-slate-400">
-                        Hiệu quả Chặn tấn công (Attack Blocked)
-                      </div>
-                      <div className="mt-1 flex items-baseline gap-2">
-                        <span className="text-2xl font-extrabold font-mono text-sky-300">
-                          {dryRun.attack_blocked_rate}%
-                        </span>
-                        <span className="text-xs font-mono text-slate-400">
-                          ({dryRun.blocked_attack_logs}/{dryRun.total_attack_logs} req)
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="rounded-lg border border-slate-800 bg-black/35 p-3">
-                      <div className="text-[11px] text-slate-400">
-                        Chặn nhầm khách thật (False Positives)
-                      </div>
-                      <div className="mt-1 flex items-baseline gap-2">
-                        <span
-                          className={`text-2xl font-extrabold font-mono ${
-                            dryRun.blocked_clean === 0
-                              ? "text-emerald-400"
-                              : "text-rose-400"
-                          }`}
-                        >
-                          {dryRun.blocked_clean} / {dryRun.total_clean}
-                        </span>
-                        <span className="text-xs font-semibold text-emerald-300">
-                          {dryRun.blocked_clean === 0 ? "(An toàn)" : "(Cần chỉnh)"}
-                        </span>
-                      </div>
-                    </div>
+                      <FileText className="h-3.5 w-3.5" />
+                      1. Báo cáo SOC
+                    </button>
+                    <button
+                      onClick={() => setActiveTab("policy")}
+                      className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 font-semibold transition ${
+                        activeTab === "policy"
+                          ? "bg-sky-500/20 text-sky-200 border border-sky-500/40"
+                          : "text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      2. Virtual Patch
+                    </button>
+                    <button
+                      onClick={() => setActiveTab("diff")}
+                      className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 font-semibold transition ${
+                        activeTab === "diff"
+                          ? "bg-sky-500/20 text-sky-200 border border-sky-500/40"
+                          : "text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      <Code2 className="h-3.5 w-3.5" />
+                      3. Hotfix Diff
+                    </button>
+                    <button
+                      onClick={() => setActiveTab("api")}
+                      className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 font-semibold transition ${
+                        activeTab === "api"
+                          ? "bg-sky-500/20 text-sky-200 border border-sky-500/40"
+                          : "text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      <Terminal className="h-3.5 w-3.5" />
+                      4. API &amp; cURL
+                    </button>
                   </div>
-                )}
-              </div>
 
-              {/* 4 TABS: Virtual Patch Policy | SOC Report & Export | Hotfix Code Diff | Raw API & cURL */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 rounded-xl border border-slate-800 bg-[#070b14] p-1 text-xs">
-                <button
-                  onClick={() => setActiveTab("policy")}
-                  className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 font-semibold transition ${
-                    activeTab === "policy"
-                      ? "bg-sky-500/20 text-sky-200 border border-sky-500/40"
-                      : "text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  <ShieldCheck className="h-3.5 w-3.5" />
-                  1. Virtual Patch
-                </button>
-                <button
-                  onClick={() => setActiveTab("report")}
-                  className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 font-semibold transition ${
-                    activeTab === "report"
-                      ? "bg-sky-500/20 text-sky-200 border border-sky-500/40"
-                      : "text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  <FileText className="h-3.5 w-3.5" />
-                  2. Báo cáo SOC
-                </button>
-                <button
-                  onClick={() => setActiveTab("diff")}
-                  className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 font-semibold transition ${
-                    activeTab === "diff"
-                      ? "bg-sky-500/20 text-sky-200 border border-sky-500/40"
-                      : "text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  <Code2 className="h-3.5 w-3.5" />
-                  3. Hotfix Diff
-                </button>
-                <button
-                  onClick={() => setActiveTab("api")}
-                  className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 font-semibold transition ${
-                    activeTab === "api"
-                      ? "bg-sky-500/20 text-sky-200 border border-sky-500/40"
-                      : "text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  <Terminal className="h-3.5 w-3.5" />
-                  4. API &amp; cURL
-                </button>
-              </div>
-
-              {/* TAB 1: VIRTUAL PATCH POLICY */}
-              {activeTab === "policy" && (
-                <div className="space-y-3">
-                  {!currentProposedRule ? (
-                    <div className="rounded-xl border border-dashed border-slate-800 bg-[#090f1d] p-6 text-center text-xs text-slate-500">
-                      Chưa có luật Virtual Patch nào được đề xuất. Chạy AI SOC Điều tra để sinh luật JSON an toàn (không dùng eval/exec).
-                    </div>
-                  ) : (
-                    <>
-                      <div className="rounded-xl border border-slate-800 bg-[#05080f] overflow-hidden">
-                        <div className="flex items-center justify-between border-b border-slate-800 bg-slate-900/70 px-3 py-2 text-[11px]">
-                          <span className="font-semibold text-slate-200">
-                            {currentProposedRule.name}{" "}
-                            <span className="font-mono text-slate-500">
-                              ({currentProposedRule.id})
-                            </span>
-                          </span>
-                          <span className="rounded bg-sky-500/15 px-2 py-0.5 font-mono text-sky-300 border border-sky-500/30">
-                            Declarative JSON · Zero eval()
-                          </span>
-                        </div>
-                        <pre className="overflow-x-auto p-3.5 font-mono text-xs text-emerald-200 leading-relaxed">
-                          {JSON.stringify(currentProposedRule.rule_spec, null, 2)}
-                        </pre>
-                      </div>
-
-                      {/* Big Enforce / Rollback Button */}
-                      <button
-                        onClick={handleEnforceOrRollback}
-                        disabled={loadingAction !== null}
-                        className={`w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3.5 text-sm font-bold transition shadow-lg disabled:opacity-50 ${
-                          currentProposedRule.status === "ACTIVE"
-                            ? "bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-white shadow-rose-500/20"
-                            : "bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white shadow-emerald-500/25"
-                        }`}
-                      >
-                        {currentProposedRule.status === "ACTIVE" ? (
-                          <>
-                            <ShieldOff className="h-4 w-4" />
-                            Rollback — Hoàn tác Luật Chặn (1 chạm)
-                          </>
-                        ) : (
-                          <>
-                            <ShieldCheck className="h-4 w-4" />
-                            Duyệt &amp; Kích hoạt Luật Chặn (Live Middleware)
-                          </>
-                        )}
-                      </button>
-
-                      {currentProposedRule.status === "ACTIVE" && (
-                        <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3 text-xs text-emerald-200 leading-relaxed">
-                          <strong>Luật đang hoạt động thật trong Middleware (&lt;5ms)!</strong>{" "}
-                          Hãy bấm lại nút tấn công ở thanh trên để kiểm chứng request bị chặn{" "}
-                          <code className="font-mono font-bold text-rose-300">
-                            403/429 BLOCKED
-                          </code>
-                          , sau đó bấm{" "}
-                          <strong className="text-emerald-300">
-                            Gửi giao dịch khách hàng bình thường
-                          </strong>{" "}
-                          để chứng minh khách thật vẫn nhận{" "}
-                          <code className="font-mono font-bold text-emerald-300">
-                            200 OK
-                          </code>
-                          .
-                        </div>
-                      )}
-                    </>
+                  {activeTab === "report" && (
+                    <IncidentAnalysisReport
+                      incident={activeIncident}
+                      onNotify={showToast}
+                      onError={setErrorMsg}
+                    />
                   )}
-                </div>
-              )}
 
-              {/* TAB 2: SOC EXECUTIVE & TECHNICAL REPORT + EXPORT */}
-              {activeTab === "report" && (
-                <IncidentAnalysisReport
-                  incident={activeIncident}
-                  onNotify={showToast}
-                  onError={setErrorMsg}
-                />
-              )}
+                  {activeTab === "policy" && (
+                    <div className="space-y-3">
+                      {!currentProposedRule ? (
+                        <div className="rounded-xl border border-dashed border-slate-800 bg-[#090f1d] p-6 text-center text-xs text-slate-500">
+                          Chưa có luật Virtual Patch nào được đề xuất.
+                        </div>
+                      ) : (
+                        <>
+                          <div className="rounded-xl border border-slate-800 bg-[#05080f] overflow-hidden">
+                            <div className="flex items-center justify-between border-b border-slate-800 bg-slate-900/70 px-3 py-2 text-[11px]">
+                              <span className="font-semibold text-slate-200">
+                                {currentProposedRule.name}{" "}
+                                <span className="font-mono text-slate-500">
+                                  ({currentProposedRule.id})
+                                </span>
+                              </span>
+                              <span className="rounded bg-sky-500/15 px-2 py-0.5 font-mono text-sky-300 border border-sky-500/30">
+                                Declarative JSON · Zero eval()
+                              </span>
+                            </div>
+                            <pre className="overflow-x-auto p-3.5 font-mono text-xs text-emerald-200 leading-relaxed">
+                              {JSON.stringify(currentProposedRule.rule_spec, null, 2)}
+                            </pre>
+                          </div>
 
-              {/* TAB 3: HOTFIX CODE DIFF */}
-              {activeTab === "diff" && (
-                <div className="space-y-3">
-                  {!activeIncident?.hotfix_diff ? (
-                    <div className="rounded-xl border border-dashed border-slate-800 bg-[#090f1d] p-6 text-center text-xs text-slate-500">
-                      Chưa có Hotfix Code Diff. Chạy AI SOC Điều tra để nhận bản vá mã nguồn gốc cho kỹ sư Fintech.
+                          <button
+                            onClick={() => handleEnforceOrRollbackRule(currentProposedRule)}
+                            disabled={loadingAction !== null}
+                            className={`w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold transition shadow-lg disabled:opacity-50 ${
+                              currentProposedRule.status === "ACTIVE"
+                                ? "bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-white"
+                                : "bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white"
+                            }`}
+                          >
+                            {currentProposedRule.status === "ACTIVE" ? (
+                              <>
+                                <ShieldOff className="h-4 w-4" />
+                                Rollback — Hoàn tác Luật Chặn (1 chạm)
+                              </>
+                            ) : (
+                              <>
+                                <ShieldCheck className="h-4 w-4" />
+                                Duyệt &amp; Kích hoạt Luật Chặn (Live Middleware)
+                              </>
+                            )}
+                          </button>
+                        </>
+                      )}
                     </div>
-                  ) : (
-                    <>
+                  )}
+
+                  {activeTab === "diff" && (
+                    <div className="space-y-3">
+                      {!activeIncident?.hotfix_diff ? (
+                        <div className="rounded-xl border border-dashed border-slate-800 bg-[#090f1d] p-6 text-center text-xs text-slate-500">
+                          Chưa có bản vá mã nguồn (Hotfix Diff).
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center justify-between text-xs text-slate-400">
+                            <span>Bản vá gốc rễ cho đội Dev (Git Unified Diff)</span>
+                            <button
+                              onClick={() =>
+                                handleCopy("diff", activeIncident.hotfix_diff || "")
+                              }
+                              className="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-[11px] font-medium text-slate-200 hover:bg-slate-700"
+                            >
+                              <Copy className="h-3 w-3" />
+                              {copiedKey === "diff" ? "Đã copy!" : "Copy Diff"}
+                            </button>
+                          </div>
+                          <DiffViewer diff={activeIncident.hotfix_diff} />
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {activeTab === "api" && (
+                    <div className="space-y-3">
                       <div className="flex items-center justify-between text-xs">
-                        <span className="text-slate-400">
-                          Đề xuất vá triệt để tại mã nguồn dịch vụ thanh toán:
+                        <span className="font-semibold text-slate-300">
+                          cURL Public Service API (X-API-Key: {DEMO_API_KEY})
                         </span>
                         <button
-                          onClick={() =>
-                            handleCopy("diff", activeIncident.hotfix_diff || "")
-                          }
+                          onClick={() => handleCopy("curl", curlSnippet)}
                           className="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-[11px] font-medium text-slate-200 hover:bg-slate-700"
                         >
                           <Copy className="h-3 w-3" />
-                          {copiedKey === "diff" ? "Đã copy!" : "Copy Diff"}
+                          {copiedKey === "curl" ? "Đã copy!" : "Copy cURL"}
                         </button>
                       </div>
-                      <DiffViewer diff={activeIncident.hotfix_diff} />
-                    </>
+                      <pre className="overflow-x-auto rounded-xl border border-slate-800 bg-[#05080f] p-3 font-mono text-[11px] text-sky-200 leading-relaxed">
+                        {curlSnippet}
+                      </pre>
+                    </div>
                   )}
                 </div>
-              )}
-
-              {/* TAB 3: RAW API & cURL */}
-              {activeTab === "api" && (
-                <div className="space-y-3">
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-slate-300">
-                        cURL Commands (X-API-Key: {DEMO_API_KEY})
-                      </span>
-                      <button
-                        onClick={() => handleCopy("curl", curlSnippet)}
-                        className="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-[11px] font-medium text-slate-200 hover:bg-slate-700"
-                      >
-                        <Copy className="h-3 w-3" />
-                        {copiedKey === "curl" ? "Đã copy!" : "Copy cURL"}
-                      </button>
-                    </div>
-                    <pre className="overflow-x-auto rounded-xl border border-slate-800 bg-[#05080f] p-3 font-mono text-[11px] text-sky-200 leading-relaxed">
-                      {curlSnippet}
-                    </pre>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-slate-300">
-                        Raw JSON Response (/v1/incidents/investigate)
-                      </span>
-                      {activeIncident && (
-                        <button
-                          onClick={() =>
-                            handleCopy(
-                              "rawjson",
-                              JSON.stringify(activeIncident, null, 2)
-                            )
-                          }
-                          className="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-[11px] font-medium text-slate-200 hover:bg-slate-700"
-                        >
-                          <Copy className="h-3 w-3" />
-                          {copiedKey === "rawjson" ? "Đã copy!" : "Copy JSON"}
-                        </button>
-                      )}
-                    </div>
-                    <pre className="max-h-72 overflow-auto rounded-xl border border-slate-800 bg-[#05080f] p-3 font-mono text-[11px] text-slate-300 leading-relaxed">
-                      {activeIncident
-                        ? JSON.stringify(activeIncident, null, 2)
-                        : "// Chưa có dữ liệu phản hồi. Bấm 'Chạy AI SOC Điều tra' để xem nguyên văn JSON."}
-                    </pre>
-                  </div>
-                </div>
-              )}
+              </section>
             </div>
-          </section>
-        </div>
+          </div>
+        )}
+
+        {/* VIEW 4: LIVE TELEMETRY, SIEM LOGS & RULES MANAGEMENT */}
+        {view === "telemetry" && (
+          <LiveTelemetryRulesView
+            logs={state?.recent_logs || []}
+            rules={state?.policy_rules || []}
+            wallets={state?.wallets || []}
+            lastSim={lastSim}
+            loadingAction={loadingAction}
+            onSimulateClassic={handleSimulateClassic}
+            onToggleRule={handleEnforceOrRollbackRule}
+          />
+        )}
       </main>
     </div>
   );
