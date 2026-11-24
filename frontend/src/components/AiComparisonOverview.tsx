@@ -317,14 +317,17 @@ export function AiComparisonOverview({
                   </div>
                 </div>
                 <div className="rounded-xl border border-emerald-500/30 bg-black/35 p-3">
-                  <div className="text-[11px] text-slate-400">Tấn công bị chặn đứng (403/429)</div>
+                  <div className="text-[11px] text-slate-400">Số request tấn công bị chặn đứng</div>
                   <div className="mt-1 font-mono text-xl font-extrabold text-sky-300">
                     {(aiDisplay?.attacks_blocked ?? 0).toLocaleString("vi-VN")}{" "}
-                    <span className="text-xs font-normal text-slate-400">req</span>
+                    <span className="text-xs font-normal text-slate-400">lượt tấn công</span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">
+                    Từ chối bằng mã HTTP 403 Forbidden / 429 Too Many Requests
                   </div>
                 </div>
                 <div className="rounded-xl border border-slate-800 bg-black/25 p-3">
-                  <div className="text-[11px] text-slate-400">Khách hàng thật an toàn (200 OK)</div>
+                  <div className="text-[11px] text-slate-400">Khách hàng thật an toàn (HTTP 200 OK)</div>
                   <div className="mt-1 font-mono text-base font-bold text-emerald-300">
                     {(aiDisplay?.clean_transactions_preserved ?? 0).toLocaleString("vi-VN")}{" "}
                     <span className="text-[11px] text-emerald-400">(0% chặn nhầm)</span>
@@ -337,30 +340,50 @@ export function AiComparisonOverview({
                   </div>
                 </div>
               </div>
+
+              {/* 2-Layer AI Defense Explanation (aligns comparison with 2-layer architecture) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 text-[11px]">
+                <div className="rounded-lg border border-emerald-500/25 bg-black/30 px-3 py-2">
+                  <div className="font-bold text-emerald-300">Lớp 1 · Virtual Patching Middleware</div>
+                  <div className="text-slate-400 mt-0.5">
+                    Chặn tấn công ngay ở tầng biên (&lt;5ms) bằng luật khai báo JSON trước khi chạm vào Payment API.
+                  </div>
+                </div>
+                <div className="rounded-lg border border-sky-500/25 bg-black/30 px-3 py-2">
+                  <div className="font-bold text-sky-300">Lớp 2 · AI SOC &amp; Chống Prompt Injection</div>
+                  <div className="text-slate-400 mt-0.5">
+                    {aiDisplay?.prompt_injection_status && aiDisplay.prompt_injection_status !== "N/A"
+                      ? aiDisplay.prompt_injection_status
+                      : "Tự động điều tra ReAct, kiểm định Dry-Run 0% chặn nhầm và sinh Hotfix Diff."}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
           {/* PER-ACCOUNT IMPACT TABLE (CRYSTAL CLEAR ACCOUNT-BY-ACCOUNT COMPARISON) */}
           <div className="rounded-2xl border border-slate-800 bg-[#0d1424]/95 p-4 shadow-xl space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <WalletIcon className="h-4 w-4 text-sky-400" />
-                So sánh Chi tiết Từng Tài khoản Hệ thống (Không AI vs Có FinSec AI)
-              </h3>
-              <span className="text-[11px] text-slate-400">
-                Theo dõi trực tiếp biến động số dư và mức độ an toàn trên từng ví khách hàng
-              </span>
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <WalletIcon className="h-4 w-4 text-sky-400" />
+                  So sánh Tác động trên 5 Nhóm Tài khoản Đại diện của Hệ thống Fintech
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  5 tài khoản mô phỏng 5 phân khúc thực tế (Khách VIP, Khách phổ thông, Merchant, Đại lý Chi hộ, Quỹ Đối soát) — mỗi nhóm chịu mức độ tấn công khác nhau theo đúng hành vi thực tế.
+                </p>
+              </div>
             </div>
 
             <div className="overflow-x-auto rounded-xl border border-slate-800 bg-[#070b14]">
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-900/95 text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-800">
                   <tr>
-                    <th className="px-3.5 py-2.5">Tài khoản Ví</th>
+                    <th className="px-3.5 py-2.5">Tài khoản &amp; Vai trò Hệ thống</th>
                     <th className="px-3.5 py-2.5">Số dư Gốc</th>
                     <th className="px-3.5 py-2.5 text-rose-300">Không có AI (Thiệt hại)</th>
                     <th className="px-3.5 py-2.5 text-emerald-300">
-                      Có FinSec AI ({showingProjected ? "Lá chắn AI" : "Live"})
+                      Có FinSec AI ({showingProjected ? "Xem trước Lá chắn AI" : "Đang bảo vệ Live"})
                     </th>
                     <th className="px-3.5 py-2.5">Mũi tấn công nhắm vào</th>
                   </tr>
@@ -382,9 +405,21 @@ export function AiComparisonOverview({
 
                     return (
                       <tr key={acc.wallet_id} className="hover:bg-slate-900/40">
-                        <td className="px-3.5 py-3">
-                          <div className="font-mono font-bold text-white">{acc.wallet_id}</div>
-                          <div className="font-mono text-[11px] text-slate-400">{acc.owner_id}</div>
+                        <td className="px-3.5 py-3 max-w-[260px]">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono font-bold text-white">{acc.wallet_id}</span>
+                            <span className="font-mono text-[11px] text-slate-400">({acc.owner_id})</span>
+                          </div>
+                          {acc.role_label && (
+                            <div className="text-[11px] font-semibold text-sky-300 mt-0.5">
+                              {acc.role_label}
+                            </div>
+                          )}
+                          {acc.role_note && (
+                            <div className="text-[10px] text-slate-500 mt-0.5 leading-snug">
+                              {acc.role_note}
+                            </div>
+                          )}
                         </td>
                         <td className="px-3.5 py-3 font-mono text-slate-300">
                           {formatVnd(acc.baseline_balance)}

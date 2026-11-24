@@ -66,6 +66,10 @@ def test_900_scenario_catalog_and_high_volume_ab_comparison() -> None:
         assert sim_off["with_ai_full_shield"]["block_rate_pct"] == 100.0
         assert len(sim_off["accounts_comparison"]) == 5
         assert len(sim_off["vector_breakdown"]) == 4
+        # Verify realistic non-uniform per-account distribution & Fintech roles
+        assert all(acc.get("role_label") for acc in sim_off["accounts_comparison"])
+        leaked_counts = [acc["without_ai_records_leaked"] for acc in sim_off["accounts_comparison"]]
+        assert len(set(leaked_counts)) > 1, f"Expected non-uniform leaked counts, got {leaked_counts}"
 
         # 3. Toggle AI Shield ON -> re-run 50,000-tx scenario -> 100% blocked, 0 loss, 0 false positives
         r_on = client.post(

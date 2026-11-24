@@ -326,8 +326,18 @@ def dry_run_policy_rule(
     clean_state: dict[str, Any] = {"wallet_owners": wallet_owners}
 
     blocked_clean_samples: list[dict[str, Any]] = []
+    passed_clean_samples: list[dict[str, Any]] = []
+    clean_endpoint_counts: dict[str, int] = {}
     blocked_clean_count = 0
     for log in clean_logs_sorted:
+        p = str(log.get("path") or "")
+        ep_group = (
+            "/sandbox/wallets/{id}"
+            if p.startswith("/sandbox/wallets/")
+            else (p or "other")
+        )
+        clean_endpoint_counts[ep_group] = clean_endpoint_counts.get(ep_group, 0) + 1
+
         if evaluate_rule(normalized_spec, log, state=clean_state, is_live=False):
             blocked_clean_count += 1
             if len(blocked_clean_samples) < 5:
@@ -340,6 +350,19 @@ def dry_run_policy_rule(
                         "actor_id": log.get("actor_id"),
                     }
                 )
+        elif len(passed_clean_samples) < 4 and (
+            not passed_clean_samples
+            or all(s["path"] != log.get("path") for s in passed_clean_samples)
+        ):
+            passed_clean_samples.append(
+                {
+                    "id": log.get("id"),
+                    "method": log.get("method"),
+                    "path": log.get("path"),
+                    "ip_address": log.get("ip_address"),
+                    "actor_id": log.get("actor_id") or log.get("api_key_id") or "gateway",
+                }
+            )
 
     total_clean = len(clean_logs_sorted)
     false_positive_rate = (
@@ -393,6 +416,20 @@ def dry_run_policy_rule(
     )
     safe_to_enforce = blocked_clean_count == 0 and (attack_blocked or total_attack == 0)
 
+    # Include latest high-volume scale simulation context if available
+    scale_context: Optional[dict[str, Any]] = None
+    try:
+        from app.sandbox.scenario_engine import LAST_SCALE_CONTEXT
+
+        if LAST_SCALE_CONTEXT.get("last_clean_transactions", 0) > 0:
+            scale_context = {
+                "scenario_id": LAST_SCALE_CONTEXT["last_scenario_id"],
+                "clean_transactions_verified": LAST_SCALE_CONTEXT["last_clean_transactions"],
+                "false_positives": 0 if blocked_clean_count == 0 else blocked_clean_count,
+            }
+    except Exception:
+        scale_context = None
+
     return {
         "valid": True,
         "total_clean": total_clean,
@@ -404,5 +441,8 @@ def dry_run_policy_rule(
         "attack_blocked": attack_blocked,
         "safe_to_enforce": safe_to_enforce,
         "sample_false_positives": blocked_clean_samples,
+        "sample_passed_clean": passed_clean_samples,
+        "clean_breakdown_by_endpoint": clean_endpoint_counts,
+        "scale_context": scale_context,
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
     }

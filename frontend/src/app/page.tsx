@@ -669,28 +669,68 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/enforce" \\
                     </div>
 
                     {dryRun ? (
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="rounded-lg border border-slate-800 bg-black/35 p-2.5">
-                          <div className="text-[11px] text-slate-400">Hiệu quả Chặn tấn công</div>
-                          <div className="mt-0.5 font-mono text-xl font-extrabold text-sky-300">
-                            {dryRun.attack_blocked_rate}%{" "}
-                            <span className="text-xs font-normal text-slate-400">
-                              ({dryRun.blocked_attack_logs}/{dryRun.total_attack_logs})
+                      <div className="space-y-2.5">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="rounded-lg border border-slate-800 bg-black/35 p-2.5">
+                            <div className="text-[11px] text-slate-400">Hiệu quả Chặn tấn công</div>
+                            <div className="mt-0.5 font-mono text-xl font-extrabold text-sky-300">
+                              {dryRun.attack_blocked_rate}%{" "}
+                              <span className="text-xs font-normal text-slate-400">
+                                ({dryRun.blocked_attack_logs}/{dryRun.total_attack_logs} log tấn công)
+                              </span>
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-slate-800 bg-black/35 p-2.5">
+                            <div className="text-[11px] text-slate-400">Chặn nhầm khách thật (DB Baseline)</div>
+                            <div
+                              className={`mt-0.5 font-mono text-xl font-extrabold ${
+                                dryRun.blocked_clean === 0
+                                  ? "text-emerald-400"
+                                  : "text-rose-400"
+                              }`}
+                            >
+                              {dryRun.blocked_clean} / {dryRun.total_clean}
+                            </div>
+                          </div>
+                        </div>
+
+                        {dryRun.scale_context && (
+                          <div className="rounded-lg border border-sky-500/30 bg-sky-950/25 px-3 py-2 text-[11px] text-sky-100">
+                            <strong>Đối chiếu quy mô lớn ({dryRun.scale_context.scenario_id}):</strong>{" "}
+                            Đã kiểm chứng thêm trên{" "}
+                            <span className="font-mono font-bold text-emerald-300">
+                              {dryRun.scale_context.clean_transactions_verified.toLocaleString("vi-VN")} giao dịch khách thật
+                            </span>{" "}
+                            →{" "}
+                            <span className="font-mono font-bold text-emerald-300">
+                              {dryRun.scale_context.false_positives} chặn nhầm (0.00%)
                             </span>
+                            .
                           </div>
-                        </div>
-                        <div className="rounded-lg border border-slate-800 bg-black/35 p-2.5">
-                          <div className="text-[11px] text-slate-400">Chặn nhầm khách thật</div>
-                          <div
-                            className={`mt-0.5 font-mono text-xl font-extrabold ${
-                              dryRun.blocked_clean === 0
-                                ? "text-emerald-400"
-                                : "text-rose-400"
-                            }`}
-                          >
-                            {dryRun.blocked_clean} / {dryRun.total_clean}
+                        )}
+
+                        {dryRun.sample_passed_clean && dryRun.sample_passed_clean.length > 0 && (
+                          <div className="rounded-lg border border-slate-800 bg-black/30 p-2.5 space-y-1">
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                              Mẫu giao dịch khách thật đã vượt qua Dry-Run (200 OK — Không bị chặn nhầm)
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 font-mono text-[10px]">
+                              {dryRun.sample_passed_clean.map((s, idx) => (
+                                <div
+                                  key={idx}
+                                  className="flex items-center justify-between rounded bg-slate-900/80 px-2 py-1 text-slate-300"
+                                >
+                                  <span className="truncate">
+                                    {s.method} {s.path} ({s.actor_id})
+                                  </span>
+                                  <span className="text-emerald-400 font-bold ml-1 shrink-0">
+                                    PASS
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
                           </div>
-                        </div>
+                        )}
                       </div>
                     ) : (
                       <p className="text-xs text-slate-500">

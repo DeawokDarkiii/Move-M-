@@ -66,6 +66,19 @@ export interface DryRunReport {
   attack_blocked: boolean;
   safe_to_enforce: boolean;
   sample_false_positives?: Array<Record<string, unknown>>;
+  sample_passed_clean?: Array<{
+    id?: number;
+    method: string;
+    path: string;
+    ip_address: string;
+    actor_id: string;
+  }>;
+  clean_breakdown_by_endpoint?: Record<string, number>;
+  scale_context?: {
+    scenario_id: string;
+    clean_transactions_verified: number;
+    false_positives: number;
+  } | null;
   evaluated_at?: string;
 }
 
@@ -350,6 +363,9 @@ export interface VectorBreakdownItem {
 export interface AccountComparisonItem {
   wallet_id: string;
   owner_id: string;
+  role_label?: string;
+  role_tier?: string;
+  role_note?: string;
   baseline_balance: number;
   without_ai_balance: number;
   without_ai_delta: number;

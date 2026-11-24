@@ -189,6 +189,99 @@ VECTOR_META: dict[str, dict[str, Any]] = {
 
 DEFAULT_WALLET_IDS = ["W_1001", "W_1002", "W_1003", "W_1004", "W_1005"]
 
+# 5 representative system account tiers in a real Fintech payment platform
+ACCOUNT_PROFILES: dict[str, dict[str, Any]] = {
+    "W_1001": {
+        "role_label": "Khách hàng VIP (Retail VIP)",
+        "role_tier": "RETAIL_VIP",
+        "role_note": "Tần suất rút tiền & nạp ví cao — mục tiêu ưu tiên của Race Condition / Webhook Replay",
+        "vector_weights": {
+            "webhook_replay": 0.24,
+            "bola_idor": 0.14,
+            "leaked_key": 0.08,
+            "race_condition": 0.42,
+        },
+    },
+    "W_1002": {
+        "role_label": "Khách hàng Phổ thông (Retail)",
+        "role_tier": "RETAIL_STD",
+        "role_note": "Tài khoản người dùng đại trà — thường bị quét đọc trộm sao kê qua lỗ hổng BOLA/IDOR",
+        "vector_weights": {
+            "webhook_replay": 0.10,
+            "bola_idor": 0.36,
+            "leaked_key": 0.07,
+            "race_condition": 0.16,
+        },
+    },
+    "W_1003": {
+        "role_label": "Tài khoản Merchant Đối tác",
+        "role_tier": "MERCHANT",
+        "role_note": "Nhận webhook thanh toán tự động liên tục — rủi ro lớn nhất khi bị Webhook Replay",
+        "vector_weights": {
+            "webhook_replay": 0.44,
+            "bola_idor": 0.22,
+            "leaked_key": 0.15,
+            "race_condition": 0.11,
+        },
+    },
+    "W_1004": {
+        "role_label": "Đại lý Chi hộ (Payout Agent)",
+        "role_tier": "AGENT",
+        "role_note": "Thực hiện lệnh rút/chi hộ giá trị lớn — mục tiêu của Race Condition & BOLA",
+        "vector_weights": {
+            "webhook_replay": 0.17,
+            "bola_idor": 0.18,
+            "leaked_key": 0.12,
+            "race_condition": 0.27,
+        },
+    },
+    "W_1005": {
+        "role_label": "Quỹ Đối soát Tổng (Treasury)",
+        "role_tier": "TREASURY",
+        "role_note": "Chứa dữ liệu đối soát liên ngân hàng — mục tiêu chính khi bị lộ Internal Settlement Key",
+        "vector_weights": {
+            "webhook_replay": 0.05,
+            "bola_idor": 0.10,
+            "leaked_key": 0.58,
+            "race_condition": 0.04,
+        },
+    },
+}
+
+# Tracks the latest high-volume clean traffic profile for Dry-Run cross-validation context
+LAST_SCALE_CONTEXT: dict[str, Any] = {
+    "last_scenario_id": None,
+    "last_total_transactions": 0,
+    "last_clean_transactions": 0,
+}
+
+
+def _distribute_weighted(
+    total: int,
+    wids: list[str],
+    base_weights: dict[str, float],
+    rng: random.Random,
+) -> dict[str, int]:
+    """Distribute an integer total across wallets using realistic non-uniform jittered weights."""
+    if not wids or total <= 0:
+        return {wid: 0 for wid in wids}
+    if len(wids) == 1:
+        return {wids[0]: total}
+
+    raw = {wid: max(0.05, base_weights.get(wid, 0.2)) * rng.uniform(0.55, 1.65) for wid in wids}
+    wsum = sum(raw.values())
+    alloc: dict[str, int] = {}
+    assigned = 0
+    for idx, wid in enumerate(wids):
+        if idx == len(wids) - 1:
+            alloc[wid] = max(0, total - assigned)
+        else:
+            share = int(round(total * (raw[wid] / wsum)))
+            share = min(share, max(0, total - assigned))
+            alloc[wid] = share
+            assigned += share
+    return alloc
+
 # Recommended baseline declarative rules for 1-click Full AI Shield activation
 RECOMMENDED_AI_SHIELD_RULES: list[dict[str, Any]] = [
     {
@@ -425,6 +518,10 @@ def run_scale_simulation(
     total_attacks = max(len(active_vectors) * 10, int(tx_count * ratio_pct / 100.0))
     clean_transactions = max(0, tx_count - total_attacks)
 
+    LAST_SCALE_CONTEXT["last_scenario_id"] = scenario["id"] if scenario else "SCN-CUSTOM"
+    LAST_SCALE_CONTEXT["last_total_transactions"] = tx_count
+    LAST_SCALE_CONTEXT["last_clean_transactions"] = clean_transactions
+
     # Check currently ACTIVE rules in live middleware
     live_rules = get_active_rules_cached()
     active_condition_types = {
@@ -453,14 +550,18 @@ def run_scale_simulation(
         else [w["id"] for w in wallets]
     )
 
-    # Initialize per-account A/B ledger
+    # Initialize per-account A/B ledger with realistic Fintech role metadata
     account_map: dict[str, dict[str, Any]] = {}
     for w in wallets:
         wid = w["id"]
         bal = int(w["balance"])
+        prof = ACCOUNT_PROFILES.get(wid, {})
         account_map[wid] = {
             "wallet_id": wid,
             "owner_id": w["owner_id"],
+            "role_label": prof.get("role_label", "Tài khoản Hệ thống"),
+            "role_tier": prof.get("role_tier", "STANDARD"),
+            "role_note": prof.get("role_note", ""),
             "baseline_balance": bal,
             "without_ai_balance": bal,
             "without_ai_delta": 0,
@@ -516,43 +617,54 @@ def run_scale_simulation(
         total_blocked_live += blocked_live
         total_blocked_full += blocked_full
 
-        # Distribute impact across target wallets
+        # Distribute impact NON-UNIFORMLY across target wallets based on realistic Fintech account roles
         impacted_wids = [wid for wid in target_wallet_ids if wid in account_map] or list(account_map.keys())
-        per_wallet_share = max(1, succeeded_without_ai // len(impacted_wids))
-        per_wallet_loss = loss_without_ai // len(impacted_wids)
+        role_weights = {
+            wid: ACCOUNT_PROFILES.get(wid, {}).get("vector_weights", {}).get(vec, 0.2)
+            for wid in impacted_wids
+        }
+        hits_by_wallet = _distribute_weighted(succeeded_without_ai, impacted_wids, role_weights, rng)
+        attempts_by_wallet = _distribute_weighted(attempts, impacted_wids, role_weights, rng)
+        loss_by_wallet = _distribute_weighted(loss_without_ai, impacted_wids, role_weights, rng)
 
         for wid in impacted_wids:
             acc = account_map[wid]
+            w_hits = hits_by_wallet.get(wid, 0)
+            w_attempts = attempts_by_wallet.get(wid, 0)
+            w_loss = loss_by_wallet.get(wid, 0)
+            if w_attempts <= 0 and w_hits <= 0:
+                continue
+
             if vec not in acc["targeted_vectors"]:
                 acc["targeted_vectors"].append(vec)
-            acc["without_ai_attacks_hit"] += per_wallet_share
-            acc["with_ai_full_blocked"] += max(1, attempts // len(impacted_wids))
+            acc["without_ai_attacks_hit"] += w_hits
+            acc["with_ai_full_blocked"] += w_attempts
 
             if is_covered_live:
-                acc["with_ai_live_blocked"] += max(1, attempts // len(impacted_wids))
+                acc["with_ai_live_blocked"] += w_attempts
             else:
-                acc["with_ai_live_leaked_hits"] += per_wallet_share
+                acc["with_ai_live_leaked_hits"] += w_hits
 
             if vec == "webhook_replay":
                 # Fake inflated balance
-                acc["without_ai_balance"] += per_wallet_loss
-                acc["without_ai_delta"] += per_wallet_loss
+                acc["without_ai_balance"] += w_loss
+                acc["without_ai_delta"] += w_loss
                 if not is_covered_live:
-                    acc["with_ai_live_balance"] += per_wallet_loss
-                    acc["with_ai_live_delta"] += per_wallet_loss
+                    acc["with_ai_live_balance"] += w_loss
+                    acc["with_ai_live_delta"] += w_loss
             elif vec == "race_condition":
                 # Overdraft / drained balance
-                acc["without_ai_balance"] -= per_wallet_loss
-                acc["without_ai_delta"] -= per_wallet_loss
+                acc["without_ai_balance"] -= w_loss
+                acc["without_ai_delta"] -= w_loss
                 if not is_covered_live:
-                    acc["with_ai_live_balance"] -= per_wallet_loss
-                    acc["with_ai_live_delta"] -= per_wallet_loss
+                    acc["with_ai_live_balance"] -= w_loss
+                    acc["with_ai_live_delta"] -= w_loss
             else:
-                # Data leak (BOLA or Leaked Key)
-                acc["without_ai_records_leaked"] += per_wallet_share
-                total_records_leaked_without_ai += per_wallet_share
+                # Data leak (BOLA or Leaked Key) — distinct per-account leaked records
+                acc["without_ai_records_leaked"] += w_hits
+                total_records_leaked_without_ai += w_hits
                 if not is_covered_live:
-                    total_records_leaked_live += per_wallet_share
+                    total_records_leaked_live += w_hits
 
         vector_breakdown.append(
             {
