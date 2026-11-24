@@ -61,8 +61,9 @@ def test_900_scenario_catalog_and_high_volume_ab_comparison() -> None:
         assert r_sim_off.status_code == 200
         sim_off = r_sim_off.json()
         assert sim_off["total_transactions"] == 50000
-        # Traditional bank/fintech security already blocks ~48%-72% of naive/flood attacks, not 0%!
-        assert 45.0 <= sim_off["without_ai"]["block_rate_pct"] <= 75.0
+        # Traditional 5-layer bank/fintech security already blocks ~64%-82% of attacks
+        assert 60.0 <= sim_off["without_ai"]["block_rate_pct"] <= 85.0
+        assert len(sim_off["without_ai"]["traditional_layers"]) == 5
         assert sim_off["without_ai"]["attacks_blocked"] > 0
         assert sim_off["without_ai"]["false_positives"] > 0
         assert sim_off["without_ai"]["financial_loss_vnd"] > 0

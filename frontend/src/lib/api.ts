@@ -399,6 +399,7 @@ export interface ScaleSimulationResponse {
   active_condition_types: string[];
   without_ai: {
     defense_label?: string;
+    traditional_layers?: Array<{ layer: string; blocked: number }>;
     attacks_succeeded: number;
     attacks_blocked: number;
     block_rate_pct: number;

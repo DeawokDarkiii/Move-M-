@@ -244,10 +244,10 @@ export function AiComparisonOverview({
                   </div>
                   <div>
                     <h3 className="text-sm font-bold text-amber-200">
-                      BẢO MẬT TRUYỀN THỐNG (WAF + Rate Limit · Không AI)
+                      BẢO MẬT NGÂN HÀNG TRUYỀN THỐNG (5 Lớp Tĩnh · Không AI)
                     </h3>
                     <p className="text-[11px] text-slate-400">
-                      Đã có code auth, WAF &amp; rate-limit tĩnh — nhưng vẫn lọt tấn công logic nghiệp vụ
+                      WAF, Rate Limit, IAM/RBAC, App/DB Guard &amp; SIEM tĩnh — chặn ~70–80%, vẫn lọt lỗ hổng logic zero-day
                     </p>
                   </div>
                 </div>
@@ -295,9 +295,30 @@ export function AiComparisonOverview({
                 </div>
               </div>
 
+              {noAi?.traditional_layers && noAi.traditional_layers.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    5 lớp phòng thủ truyền thống đã chặn ({(noAi.attacks_blocked ?? 0).toLocaleString("vi-VN")} lượt)
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {noAi.traditional_layers.map((item) => (
+                      <span
+                        key={item.layer}
+                        className="rounded-md border border-slate-700 bg-slate-900/90 px-2 py-1 text-[10px] text-slate-300"
+                      >
+                        {item.layer}:{" "}
+                        <strong className="font-mono text-sky-300">
+                          {item.blocked.toLocaleString("vi-VN")}
+                        </strong>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="rounded-lg border border-rose-500/25 bg-black/30 px-3 py-2 text-[11px] text-slate-300">
-                <strong className="text-rose-300">Điểm mù của bảo mật tĩnh:</strong>{" "}
-                WAF &amp; rate-limit chỉ kiểm tra cú pháp/tần suất thô, không hiểu ngữ cảnh nghiệp vụ (trùng <code>event_id</code>, đổi <code>wallet_id</code> bằng JWT thật, rút song song &lt;100ms) và dễ chặn nhầm khách thật giờ cao điểm.
+                <strong className="text-rose-300">Khoảng trống ~20–35% còn lại (Last-Mile Gap):</strong>{" "}
+                Các lớp tĩnh khó bắt kịp lỗi logic vừa deploy (sót <code>owner_id</code>, khe hở TOCTOU &lt;100ms, key bị lộ gọi từ IP sạch) và mất 1.5–3.5 giờ để đội SOC/Dev điều tra &amp; vá thủ công.
               </div>
             </div>
 

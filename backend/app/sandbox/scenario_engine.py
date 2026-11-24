@@ -160,9 +160,9 @@ VECTOR_META: dict[str, dict[str, Any]] = {
         "endpoint": "/sandbox/webhook/payment-success",
         "avg_loss_per_hit_vnd": 1_500_000,
         "block_http_code": 403,
-        "traditional_block_range": (0.52, 0.66),
+        "traditional_block_range": (0.66, 0.78),
         "traditional_gap_reason": (
-            "WAF & Rate Limit chặn được flood từ IP xấu đã biết (~58%), nhưng lọt các gói replay có chữ ký/JSON hợp lệ gửi qua proxy sạch hoặc độ trễ vài giây."
+            "WAF, IP Intel, kiểm tra chữ ký & cache trùng ngắn hạn chặn được ~72%, nhưng vẫn lọt các gói replay trễ (sau TTL cache) hoặc từ cụm proxy sạch khi DB thiếu ràng buộc UNIQUE."
         ),
     },
     "bola_idor": {
@@ -172,9 +172,9 @@ VECTOR_META: dict[str, dict[str, Any]] = {
         "endpoint": "/sandbox/wallets/{wallet_id}",
         "avg_loss_per_hit_vnd": 180_000,
         "block_http_code": 403,
-        "traditional_block_range": (0.48, 0.62),
+        "traditional_block_range": (0.64, 0.76),
         "traditional_gap_reason": (
-            "Auth tĩnh chặn được request thiếu JWT/token hết hạn (~55%), nhưng không kiểm tra chéo chủ sở hữu khi tài khoản thật đổi wallet_id."
+            "IAM/JWT, RBAC phân quyền vai trò & SIEM ngưỡng tốc độ chặn được ~70%, nhưng lọt hành vi quét chậm (low-and-slow) bằng tài khoản thật khi 1 endpoint mới deploy sót check owner_id."
         ),
     },
     "leaked_key": {
@@ -184,9 +184,9 @@ VECTOR_META: dict[str, dict[str, Any]] = {
         "endpoint": "/sandbox/admin/settlement",
         "avg_loss_per_hit_vnd": 950_000,
         "block_http_code": 403,
-        "traditional_block_range": (0.56, 0.70),
+        "traditional_block_range": (0.70, 0.82),
         "traditional_gap_reason": (
-            "API Gateway chặn được key sai/brute-force (~63%), nhưng cho qua nếu kẻ tấn công dùng đúng key nội bộ bị lộ từ IP VPS công cộng."
+            "API Gateway, Geo-block & Key validation chặn được ~76% truy cập sai/bất thường, nhưng lọt nếu kẻ tấn công dùng đúng key nội bộ bị rò rỉ từ dải IP Cloud sạch trong khu vực."
         ),
     },
     "race_condition": {
@@ -196,9 +196,9 @@ VECTOR_META: dict[str, dict[str, Any]] = {
         "endpoint": "/sandbox/withdraw",
         "avg_loss_per_hit_vnd": 2_200_000,
         "block_http_code": 429,
-        "traditional_block_range": (0.58, 0.72),
+        "traditional_block_range": (0.68, 0.80),
         "traditional_gap_reason": (
-            "Rate limit theo phút (60 req/phút) chặn được đợt xả kéo dài (~65%), nhưng lọt các cụm 5–10 lệnh rút bắn song song trong dưới 100ms."
+            "Rate Limit, Fraud Rule cơ bản & kiểm tra số dư ứng dụng chặn được ~74%, nhưng vẫn lọt cửa sổ tranh chấp dưới 100ms (TOCTOU) khi nhiều request bắn đồng thời vượt qua khe hở lock."
         ),
     },
 }
@@ -850,10 +850,30 @@ def run_scale_simulation(
         else 0.0
     )
 
-    # Traditional static WAF / aggressive IP rate-limit blocks ~0.35% - 1.15% of legitimate customers at peak load
-    trad_fp_count = max(1, int(round(clean_transactions * rng.uniform(0.0035, 0.0115))))
+    # Traditional 5-layer static bank security breakdown (WAF, Rate Limit, IAM/RBAC, App/DB Guards, Rule-Based SIEM)
+    layer_weights = [0.24, 0.22, 0.21, 0.19, 0.14]
+    layer_names = [
+        "WAF & API Schema",
+        "Rate Limit & IP Intel",
+        "IAM / JWT & RBAC",
+        "App & DB Guard tĩnh",
+        "SIEM Rule & SOC L1",
+    ]
+    traditional_layers: list[dict[str, Any]] = []
+    rem_trad = total_blocked_traditional
+    for idx_l, (lname, lw) in enumerate(zip(layer_names, layer_weights)):
+        if idx_l == len(layer_names) - 1:
+            cnt_l = max(0, rem_trad)
+        else:
+            cnt_l = max(0, int(round(total_blocked_traditional * lw * rng.uniform(0.85, 1.15))))
+            cnt_l = min(cnt_l, rem_trad)
+            rem_trad -= cnt_l
+        traditional_layers.append({"layer": lname, "blocked": cnt_l})
+
+    # Rigid static WAF / aggressive IP rate-limit blocks ~0.35% - 1.05% of legitimate customers at peak load
+    trad_fp_count = max(1, int(round(clean_transactions * rng.uniform(0.0035, 0.0105))))
     trad_fp_rate = round((trad_fp_count / clean_transactions) * 100.0, 2) if clean_transactions else 0.0
-    trad_mttr_minutes = rng.randint(110, 240)
+    trad_mttr_minutes = rng.randint(90, 210)
 
     return {
         "scenario": scenario
@@ -876,7 +896,8 @@ def run_scale_simulation(
         "active_rules_count": len(live_rules),
         "active_condition_types": sorted(active_condition_types),
         "without_ai": {
-            "defense_label": "Bảo mật Tĩnh Truyền thống (WAF + Rate Limit + Auth cơ bản)",
+            "defense_label": "Bảo mật Ngân hàng Truyền thống (5 lớp: WAF, Rate Limit, IAM/RBAC, App/DB Guard, SIEM tĩnh)",
+            "traditional_layers": traditional_layers,
             "attacks_succeeded": sum(v["succeeded_without_ai"] for v in vector_breakdown),
             "attacks_blocked": total_blocked_traditional,
             "block_rate_pct": trad_block_rate,
