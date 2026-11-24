@@ -23,8 +23,8 @@ import {
 import { AiComparisonOverview } from "@/components/AiComparisonOverview";
 import { DiffViewer } from "@/components/DiffViewer";
 import { IncidentAnalysisReport } from "@/components/IncidentAnalysisReport";
-import { LiveTelemetryRulesView } from "@/components/LiveTelemetryRulesView";
 import { ScenarioCatalogExplorer } from "@/components/ScenarioCatalogExplorer";
+import { SiemLogsAndRulesTab } from "@/components/SiemLogsAndRulesTab";
 import {
   API_BASE_URL,
   DEMO_API_KEY,
@@ -32,7 +32,6 @@ import {
   PolicyRule,
   SandboxState,
   ScaleSimulationResponse,
-  SimulationResponse,
   enforcePolicyRule,
   fetchSandboxState,
   resetSandboxApi,
@@ -43,8 +42,8 @@ import {
   triggerSimulation,
 } from "@/lib/api";
 
-type WorkspaceView = "overview" | "scenarios" | "investigation" | "telemetry";
-type RightTab = "policy" | "report" | "diff" | "api";
+type WorkspaceView = "overview" | "scenarios" | "investigation";
+type RightTab = "report" | "policy" | "siem" | "diff" | "api";
 
 const SEVERITY_STYLES: Record<string, string> = {
   CRITICAL:
@@ -60,8 +59,7 @@ export default function FinSecWorkspacePage() {
   const [scaleResult, setScaleResult] = useState<ScaleSimulationResponse | null>(null);
   const [activeIncident, setActiveIncident] = useState<IncidentReport | null>(null);
   const [visibleStepsCount, setVisibleStepsCount] = useState<number>(0);
-  const [lastSim, setLastSim] = useState<SimulationResponse | null>(null);
-  const [activeTab, setActiveTab] = useState<RightTab>("policy");
+  const [activeTab, setActiveTab] = useState<RightTab>("report");
 
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -177,37 +175,17 @@ export default function FinSecWorkspacePage() {
     }
   };
 
-  const handleSimulateClassic = async (
-    scenario:
-      | "webhook_replay"
-      | "bola_idor"
-      | "leaked_key"
-      | "race_condition"
-      | "prompt_injection"
-      | "normal_traffic"
-  ) => {
-    setLoadingAction(scenario);
+  const handleVerifyNormalTraffic = async () => {
+    setLoadingAction("normal_traffic");
     setErrorMsg(null);
     try {
-      const inject = scenario === "prompt_injection";
-      const res = await triggerSimulation(scenario, inject);
-      setLastSim(res);
-      if (scenario === "normal_traffic") {
-        showToast(
-          `Giao dịch khách thật: ${res.succeeded_200}/${res.total_requests} thành công 200 OK (0 chặn nhầm).`
-        );
-      } else if (res.blocked_count > 0 && res.succeeded_200 === 0) {
-        showToast(
-          `VIRTUAL PATCH ĐÃ CHẶN: ${res.blocked_count}/${res.total_requests} request bị chặn 403/429 (<5ms).`
-        );
-      } else {
-        showToast(
-          `Đã bắn kịch bản ${scenario}: ${res.succeeded_200} lọt (200 OK), ${res.blocked_count} bị chặn.`
-        );
-      }
+      const res = await triggerSimulation("normal_traffic", false);
+      showToast(
+        `Kiểm chứng Live Middleware: ${res.succeeded_200}/${res.total_requests} giao dịch khách thật thành công HTTP 200 OK (0 chặn nhầm).`
+      );
       await refreshState();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Lỗi mô phỏng HTTP");
+      setErrorMsg(err instanceof Error ? err.message : "Lỗi kiểm chứng giao dịch sạch");
     } finally {
       setLoadingAction(null);
     }
@@ -259,7 +237,6 @@ export default function FinSecWorkspacePage() {
       const res = await resetSandboxApi();
       setActiveIncident(null);
       setScaleResult(null);
-      setLastSim(null);
       setVisibleStepsCount(0);
       showToast(
         `Reset sạch thành công: khôi phục ${res.wallets_restored} ví & giữ nguyên ${res.clean_baseline_preserved} log sạch.`
@@ -381,9 +358,9 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/enforce" \\
           </div>
         </div>
 
-        {/* Clean 4-Tab Primary SOC Navigation */}
+        {/* Clean 3-Tab Primary SOC Navigation */}
         <div className="mx-auto max-w-[1520px] px-4 pb-2.5">
-          <nav className="grid grid-cols-2 lg:grid-cols-4 gap-1.5 rounded-xl border border-slate-800 bg-[#060a12] p-1 text-xs">
+          <nav className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 rounded-xl border border-slate-800 bg-[#060a12] p-1 text-xs">
             <button
               onClick={() => setView("overview")}
               className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 font-bold transition ${
@@ -393,7 +370,7 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/enforce" \\
               }`}
             >
               <ShieldCheck className="h-4 w-4" />
-              1. So sánh AI vs Không AI
+              1. So sánh AI vs Truyền thống
             </button>
             <button
               onClick={() => setView("scenarios")}
@@ -415,23 +392,12 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/enforce" \\
               }`}
             >
               <Cpu className="h-4 w-4" />
-              3. Điều tra AI SOC &amp; Báo cáo
-              {activeIncident && (
+              3. Điều tra AI SOC, Báo cáo &amp; Log SIEM
+              {(state?.recent_logs.length ?? 0) > 0 && (
                 <span className="rounded-full bg-emerald-500/25 px-1.5 py-0.5 text-[10px] font-mono">
-                  1
+                  {state?.recent_logs.length}
                 </span>
               )}
-            </button>
-            <button
-              onClick={() => setView("telemetry")}
-              className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 font-bold transition ${
-                view === "telemetry"
-                  ? "bg-amber-500/20 text-amber-200 border border-amber-500/40 shadow"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              <Activity className="h-4 w-4" />
-              4. SIEM Logs &amp; Luật ({state?.recent_logs.length ?? 0})
             </button>
           </nav>
         </div>
@@ -739,51 +705,62 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/enforce" \\
                     )}
                   </div>
 
-                  {/* 4 Sub-Tabs */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 rounded-xl border border-slate-800 bg-[#070b14] p-1 text-xs">
+                  {/* 5 Sub-Tabs inside SOC Workbench */}
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-1 rounded-xl border border-slate-800 bg-[#070b14] p-1 text-[11px]">
                     <button
                       onClick={() => setActiveTab("report")}
-                      className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 font-semibold transition ${
+                      className={`inline-flex items-center justify-center gap-1 rounded-lg px-2 py-2 font-semibold transition ${
                         activeTab === "report"
                           ? "bg-sky-500/20 text-sky-200 border border-sky-500/40"
                           : "text-slate-400 hover:text-slate-200"
                       }`}
                     >
                       <FileText className="h-3.5 w-3.5" />
-                      1. Báo cáo SOC
+                      1. Báo cáo
                     </button>
                     <button
                       onClick={() => setActiveTab("policy")}
-                      className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 font-semibold transition ${
+                      className={`inline-flex items-center justify-center gap-1 rounded-lg px-2 py-2 font-semibold transition ${
                         activeTab === "policy"
                           ? "bg-sky-500/20 text-sky-200 border border-sky-500/40"
                           : "text-slate-400 hover:text-slate-200"
                       }`}
                     >
                       <ShieldCheck className="h-3.5 w-3.5" />
-                      2. Virtual Patch
+                      2. Patch
+                    </button>
+                    <button
+                      onClick={() => setActiveTab("siem")}
+                      className={`inline-flex items-center justify-center gap-1 rounded-lg px-2 py-2 font-semibold transition ${
+                        activeTab === "siem"
+                          ? "bg-sky-500/20 text-sky-200 border border-sky-500/40"
+                          : "text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      <Activity className="h-3.5 w-3.5" />
+                      3. Log &amp; Luật
                     </button>
                     <button
                       onClick={() => setActiveTab("diff")}
-                      className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 font-semibold transition ${
+                      className={`inline-flex items-center justify-center gap-1 rounded-lg px-2 py-2 font-semibold transition ${
                         activeTab === "diff"
                           ? "bg-sky-500/20 text-sky-200 border border-sky-500/40"
                           : "text-slate-400 hover:text-slate-200"
                       }`}
                     >
                       <Code2 className="h-3.5 w-3.5" />
-                      3. Hotfix Diff
+                      4. Hotfix
                     </button>
                     <button
                       onClick={() => setActiveTab("api")}
-                      className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 font-semibold transition ${
+                      className={`inline-flex items-center justify-center gap-1 rounded-lg px-2 py-2 font-semibold transition ${
                         activeTab === "api"
                           ? "bg-sky-500/20 text-sky-200 border border-sky-500/40"
                           : "text-slate-400 hover:text-slate-200"
                       }`}
                     >
                       <Terminal className="h-3.5 w-3.5" />
-                      4. API &amp; cURL
+                      5. API
                     </button>
                   </div>
 
@@ -792,6 +769,16 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/enforce" \\
                       incident={activeIncident}
                       onNotify={showToast}
                       onError={setErrorMsg}
+                    />
+                  )}
+
+                  {activeTab === "siem" && (
+                    <SiemLogsAndRulesTab
+                      logs={state?.recent_logs || []}
+                      rules={state?.policy_rules || []}
+                      loadingAction={loadingAction}
+                      onToggleRule={handleEnforceOrRollbackRule}
+                      onVerifyNormalTraffic={handleVerifyNormalTraffic}
                     />
                   )}
 
@@ -895,19 +882,6 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/enforce" \\
               </section>
             </div>
           </div>
-        )}
-
-        {/* VIEW 4: LIVE TELEMETRY, SIEM LOGS & RULES MANAGEMENT */}
-        {view === "telemetry" && (
-          <LiveTelemetryRulesView
-            logs={state?.recent_logs || []}
-            rules={state?.policy_rules || []}
-            wallets={state?.wallets || []}
-            lastSim={lastSim}
-            loadingAction={loadingAction}
-            onSimulateClassic={handleSimulateClassic}
-            onToggleRule={handleEnforceOrRollbackRule}
-          />
         )}
       </main>
     </div>
