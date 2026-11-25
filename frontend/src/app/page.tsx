@@ -295,7 +295,7 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/enforce" \\
                   FinSec Agent — AI SOC &amp; Virtual Patching Console
                 </h1>
                 <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-300 border border-emerald-500/30">
-                  1.125 SCENARIOS · 2.000 BASELINE
+                  7 VECTORS · 2.000 BASELINE
                 </span>
               </div>
               <p className="text-xs text-slate-400">

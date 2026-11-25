@@ -24,20 +24,28 @@ HEADERS = {"X-API-Key": "finsec-demo-key-2026"}
 
 def test_900_scenario_catalog_and_high_volume_ab_comparison() -> None:
     with TestClient(app) as client:
-        # 1. Verify catalog has 1,200 scenarios (15 contexts * 16 compositions * 5 tiers) covering 7 historical vectors
+        # 1. Verify pruned realistic scenario catalog (no unrealistic NIGHT_SHIFT*mega or RECON_BATCH*blitz)
         r_cat = client.get("/v1/scenarios/catalog?page=1&page_size=20", headers=HEADERS)
         assert r_cat.status_code == 200
         cat = r_cat.json()
-        assert cat["total_catalog"] >= 1125
+        assert cat["total_catalog"] >= 650
         assert len(cat["items"]) == 20
 
-        # Filter by red_team_blitz + mega scale
+        # NIGHT_SHIFT must never appear in mega scale tier
+        r_night_mega = client.get(
+            "/v1/scenarios/catalog?q=NIGHT_SHIFT&scale_tier=mega",
+            headers=HEADERS,
+        )
+        assert r_night_mega.status_code == 200
+        assert r_night_mega.json()["total_filtered"] == 0
+
+        # Filter by red_team_blitz + mega scale -> only contexts allowing both blitz & mega
         r_flt = client.get(
             "/v1/scenarios/catalog?category=red_team_blitz&scale_tier=mega",
             headers=HEADERS,
         )
         assert r_flt.status_code == 200
-        assert r_flt.json()["total_filtered"] == 30  # 15 contexts * 2 red_team_blitz * 1 tier
+        assert 4 <= r_flt.json()["total_filtered"] <= 20
 
         # 2. Ensure AI Shield OFF first -> run 50,000-tx 4-vector simultaneous attack
         r_off = client.post(
@@ -76,9 +84,13 @@ def test_900_scenario_catalog_and_high_volume_ab_comparison() -> None:
         assert sim_off["without_ai"]["false_positives"] > 0
         assert sim_off["without_ai"]["financial_loss_vnd"] > 0
         # When AI Shield is OFF, live block rate equals traditional WAF baseline
+        assert sim_off["window_minutes"] == 15
+        assert sim_off["tps"] > 50
+        assert sim_off["simulation_mode"] == "statistical_ab_with_live_db_sample"
         assert sim_off["with_ai_live"]["block_rate_pct"] == sim_off["without_ai"]["block_rate_pct"]
         assert sim_off["with_ai_live"]["ai_extra_blocked"] == 0
-        assert sim_off["with_ai_full_shield"]["block_rate_pct"] == 100.0
+        # Realistic enterprise AI Shield: 98.0% - 100.0% (not rigid artificial 100%)
+        assert 98.0 <= sim_off["with_ai_full_shield"]["block_rate_pct"] <= 100.0
         assert sim_off["with_ai_full_shield"]["ai_extra_blocked"] > 0
         assert len(sim_off["accounts_comparison"]) == 5
         assert len(sim_off["vector_breakdown"]) == 7
@@ -87,14 +99,14 @@ def test_900_scenario_catalog_and_high_volume_ab_comparison() -> None:
         leaked_counts = [acc["without_ai_records_leaked"] for acc in sim_off["accounts_comparison"]]
         assert len(set(leaked_counts)) > 1, f"Expected non-uniform leaked counts, got {leaked_counts}"
 
-        # 3. Toggle AI Shield ON -> re-run 50,000-tx scenario -> 100% blocked, 0 loss, 0 false positives
+        # 3. Toggle AI Shield ON (7 rules) -> re-run 50,000-tx scenario -> >=98% blocked, <=0.05% soft-challenge FP
         r_on = client.post(
             "/v1/policies/ai-shield/toggle",
             headers=HEADERS,
             json={"enabled": True},
         )
         assert r_on.status_code == 200
-        assert r_on.json()["active_rules_count"] >= 4
+        assert r_on.json()["active_rules_count"] >= 7
 
         r_sim_on = client.post(
             "/v1/sandbox/simulate-scale",
@@ -102,16 +114,17 @@ def test_900_scenario_catalog_and_high_volume_ab_comparison() -> None:
             json={
                 "total_transactions": 50000,
                 "vectors": ["webhook_replay", "bola_idor", "leaked_key", "race_condition"],
-                "attack_ratio_pct": 4.0,
+                "attack_ratio_pct": 1.2,
                 "with_prompt_injection": True,
             },
         )
         assert r_sim_on.status_code == 200
         sim_on = r_sim_on.json()
-        assert sim_on["with_ai_live"]["block_rate_pct"] == 100.0
-        assert sim_on["with_ai_live"]["financial_loss_vnd"] == 0
-        assert sim_on["with_ai_live"]["false_positives"] == 0
-        assert sim_on["with_ai_live"]["financial_saved_vnd"] == sim_on["without_ai"]["financial_loss_vnd"]
+        assert 98.0 <= sim_on["with_ai_live"]["block_rate_pct"] <= 100.0
+        assert sim_on["with_ai_live"]["false_positive_rate_pct"] <= 0.05
+        assert sim_on["with_ai_live"]["false_positives"] < sim_on["without_ai"]["false_positives"]
+        assert sim_on["with_ai_live"]["financial_saved_vnd"] > 0
+        assert len(sim_on["kill_chain_stages"]) >= 2
 
     db_file = Path(os.environ["SQLITE_DB_PATH"])
     if db_file.exists():

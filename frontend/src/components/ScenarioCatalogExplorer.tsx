@@ -50,9 +50,9 @@ export function ScenarioCatalogExplorer({
   const [page, setPage] = useState(1);
   const [loadingList, setLoadingList] = useState(false);
 
-  // Custom High-Volume Multi-Vector Builder
+  // Custom High-Volume Multi-Vector Builder (realistic low-and-slow default 0.8%)
   const [customTx, setCustomTx] = useState(25000);
-  const [customRatio, setCustomRatio] = useState(3.2);
+  const [customRatio, setCustomRatio] = useState(0.8);
   const [customVectors, setCustomVectors] = useState<string[]>([
     "webhook_replay",
     "bola_idor",
@@ -150,15 +150,15 @@ export function ScenarioCatalogExplorer({
             </div>
             <input
               type="range"
-              min={0.5}
-              max={15}
-              step={0.5}
+              min={0.1}
+              max={5.0}
+              step={0.1}
               value={customRatio}
               onChange={(e) => setCustomRatio(Number(e.target.value))}
               className="w-full accent-rose-500"
             />
             <div className="text-[10px] font-mono text-slate-500">
-              ≈ {Math.round((customTx * customRatio) / 100).toLocaleString("vi-VN")} request độc hại ngẫu nhiên
+              ≈ {Math.round((customTx * customRatio) / 100).toLocaleString("vi-VN")} request tấn công tinh vi / 15 phút (~{((customTx / 900)).toFixed(1)} TPS)
             </div>
           </div>
 
@@ -222,14 +222,14 @@ export function ScenarioCatalogExplorer({
           <div>
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
               <Layers className="h-4 w-4 text-sky-400" />
-              Kho 900 Kịch bản Vận hành &amp; Tấn công Fintech Thực tế
+              Kho Kịch bản Vận hành &amp; Tấn công Fintech Thực tế ({catalog?.total_catalog ?? "..."} kịch bản hợp lệ)
             </h3>
             <p className="text-xs text-slate-400">
               Hiển thị{" "}
               <strong className="text-white">
-                {catalog?.total_filtered ?? 900} / {catalog?.total_catalog ?? 900}
+                {catalog?.total_filtered ?? "..."} / {catalog?.total_catalog ?? "..."}
               </strong>{" "}
-              kịch bản (15 bối cảnh vận hành × 12 tổ hợp tấn công × 5 cấp độ lưu lượng 2k–60k GD).
+              kịch bản đã lọc bỏ tổ hợp phi thực tế (cửa sổ 15 phút · tỷ lệ tấn công tinh vi 0.15% – 1.80%).
             </p>
           </div>
         </div>

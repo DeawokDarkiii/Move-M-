@@ -326,6 +326,10 @@ export interface ScenarioCatalogItem {
   category: "single_vector" | "multi_vector" | "red_team_blitz" | string;
   scale_tier: string;
   scale_label?: string;
+  window_minutes?: number;
+  tps?: number;
+  avg_tx_multiplier?: number;
+  mttr_multiplier?: number;
   total_transactions: number;
   attack_ratio_pct?: number;
   estimated_attacks?: number;
@@ -393,7 +397,16 @@ export interface AccountComparisonItem {
 
 export interface ScaleSimulationResponse {
   scenario: ScenarioCatalogItem;
+  simulation_mode?: string;
   simulation_time_ms: number;
+  window_minutes?: number;
+  tps?: number;
+  context_physics?: {
+    avg_tx_multiplier: number;
+    mttr_multiplier: number;
+  };
+  kill_chain_stages?: Array<{ phase: string; detail: string }>;
+  ai_residual_note?: string;
   total_transactions: number;
   clean_transactions: number;
   attack_transactions: number;

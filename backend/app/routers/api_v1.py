@@ -464,7 +464,7 @@ async def simulate_traffic(
                     },
                     json={
                         "wallet_id": "W_1001",
-                        "amount": 4_000_000,
+                        "amount": 40_000_000,
                         "tx_ref": f"wd_race_{uuid.uuid4().hex[:6]}",
                         "note": pi_note if inject_prompt else f"concurrent_burst_{idx + 1}",
                     },

@@ -82,7 +82,9 @@ def trace_wallet_ledger(wallet_id: str) -> dict[str, Any]:
     duplicate_tx_refs = {ref: cnt for ref, cnt in tx_ref_counts.items() if cnt > 1}
 
     total_ledger_delta = sum(int(e["amount"]) for e in entries)
-    initial_expected = 10_000_000
+    from app.seed import INITIAL_BALANCE_BY_WALLET
+
+    initial_expected = INITIAL_BALANCE_BY_WALLET.get(wallet_id, 10_000_000)
     balance = int(wallet["balance"])
 
     anomalies: list[str] = []

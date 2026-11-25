@@ -50,7 +50,14 @@ def test_01_seed_and_auth_guard(client: TestClient):
     data = r.json()
     assert data["clean_baseline_count"] == 2000
     assert len(data["wallets"]) == 5
-    assert all(w["balance"] == 10_000_000 for w in data["wallets"])
+    balances = {w["id"]: w["balance"] for w in data["wallets"]}
+    assert balances == {
+        "W_1001": 150_000_000,
+        "W_1002": 10_000_000,
+        "W_1003": 800_000_000,
+        "W_1004": 500_000_000,
+        "W_1005": 5_000_000_000,
+    }
 
 
 def test_02_webhook_replay_with_prompt_injection_and_virtual_patch(client: TestClient):
@@ -67,8 +74,8 @@ def test_02_webhook_replay_with_prompt_injection_and_virtual_patch(client: TestC
     sim_data = sim.json()
     assert sim_data["succeeded_200"] == 5
     w1 = next(w for w in sim_data["wallets"] if w["id"] == "W_1001")
-    # 10,000,000 + 5 * 5,000,000 = 35,000,000
-    assert w1["balance"] == 35_000_000
+    # 150,000,000 + 5 * 5,000,000 = 175,000,000
+    assert w1["balance"] == 175_000_000
 
     # 2. Run AI SOC Investigation
     inv = client.post("/v1/incidents/investigate", headers=HEADERS, json={})
@@ -95,7 +102,7 @@ def test_02_webhook_replay_with_prompt_injection_and_virtual_patch(client: TestC
     assert sim2.json()["blocked_count"] == 5
     assert sim2.json()["succeeded_200"] == 0
     w1_after = next(w for w in sim2.json()["wallets"] if w["id"] == "W_1001")
-    assert w1_after["balance"] == 35_000_000  # Unchanged!
+    assert w1_after["balance"] == 175_000_000  # Unchanged!
 
     # 5. Normal customer traffic -> MUST remain 200 OK!
     norm = client.post("/v1/sandbox/simulate/normal_traffic", headers=HEADERS, json={})
@@ -166,8 +173,8 @@ def test_05_race_condition_and_reset_preserves_baseline(client: TestClient):
     assert sim.status_code == 200
     assert sim.json()["succeeded_200"] == 5
     w1 = next(w for w in sim.json()["wallets"] if w["id"] == "W_1001")
-    # 10,000,000 - 5 * 4,000,000 = -10,000,000 (double-spend!)
-    assert w1["balance"] == -10_000_000
+    # 150,000,000 - 5 * 40,000,000 = -50,000,000 (VIP overdraft double-spend!)
+    assert w1["balance"] == -50_000_000
 
     inv = client.post("/v1/incidents/investigate", headers=HEADERS, json={})
     report = inv.json()
@@ -187,6 +194,8 @@ def test_05_race_condition_and_reset_preserves_baseline(client: TestClient):
     assert reset.status_code == 200
     assert reset.json()["clean_baseline_preserved"] == 2000
     state = client.get("/v1/sandbox/state", headers=HEADERS).json()
-    assert all(w["balance"] == 10_000_000 for w in state["wallets"])
+    reset_balances = {w["id"]: w["balance"] for w in state["wallets"]}
+    assert reset_balances["W_1001"] == 150_000_000
+    assert reset_balances["W_1005"] == 5_000_000_000
     assert state["active_rules_count"] == 0
     assert state["clean_baseline_count"] == 2000

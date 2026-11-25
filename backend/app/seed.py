@@ -14,12 +14,16 @@ from typing import Any
 DEFAULT_BASELINE_COUNT = 2000
 
 INITIAL_WALLETS: list[dict[str, Any]] = [
-    {"id": "W_1001", "owner_id": "usr_an", "balance": 10_000_000},
-    {"id": "W_1002", "owner_id": "usr_binh", "balance": 10_000_000},
-    {"id": "W_1003", "owner_id": "usr_chi", "balance": 10_000_000},
-    {"id": "W_1004", "owner_id": "usr_dung", "balance": 10_000_000},
-    {"id": "W_1005", "owner_id": "usr_em", "balance": 10_000_000},
+    {"id": "W_1001", "owner_id": "usr_an", "balance": 150_000_000},      # Retail VIP (150M)
+    {"id": "W_1002", "owner_id": "usr_binh", "balance": 10_000_000},     # Retail Standard (10M)
+    {"id": "W_1003", "owner_id": "usr_chi", "balance": 800_000_000},     # Partner Merchant (800M)
+    {"id": "W_1004", "owner_id": "usr_dung", "balance": 500_000_000},    # Payout Agent (500M)
+    {"id": "W_1005", "owner_id": "usr_em", "balance": 5_000_000_000},    # Settlement Treasury Pool (5B)
 ]
+
+INITIAL_BALANCE_BY_WALLET: dict[str, int] = {
+    w["id"]: int(w["balance"]) for w in INITIAL_WALLETS
+}
 
 CUSTOMER_IPS = [
     "113.161.72.14",

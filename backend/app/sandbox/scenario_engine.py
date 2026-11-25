@@ -24,24 +24,148 @@ from typing import Any, Optional
 from app.db import db
 from app.policy.engine import get_active_rules_cached
 
-# 15 realistic Vietnamese fintech operational contexts
-OPERATIONAL_CONTEXTS: list[dict[str, str]] = [
-    {"code": "PAYDAY", "label": "Cao điểm Trả lương cuối tháng", "channel": "Mobile App + Webhook"},
-    {"code": "FLASHSALE", "label": "Flash Sale Ví điện tử 12.12", "channel": "Checkout Gateway"},
-    {"code": "EOD_SETTLE", "label": "Đối soát Liên ngân hàng cuối ngày (EOD)", "channel": "Internal Settlement"},
-    {"code": "MERCHANT_T0", "label": "Giải ngân Merchant T+0", "channel": "Partner Webhook"},
-    {"code": "BILL_PAY", "label": "Cao điểm Thanh toán Hóa đơn Điện/Nước", "channel": "Mobile API"},
-    {"code": "CASHBACK", "label": "Chiến dịch Hoàn tiền 20% Toàn sàn", "channel": "Promo + Wallet API"},
-    {"code": "NIGHT_SHIFT", "label": "Ca trực đêm SOC (02:00 – 05:00)", "channel": "All Endpoints"},
-    {"code": "POST_DEPLOY", "label": "Lưu lượng sau đợt Deploy bản vá mới", "channel": "Public API"},
-    {"code": "VIP_TIER", "label": "Giao dịch nhóm Ví VIP & Doanh nghiệp", "channel": "Enterprise API"},
-    {"code": "CROSS_BORDER", "label": "Chuyển tiền & Thanh toán Xuyên biên giới", "channel": "FX + Webhook"},
-    {"code": "PARTNER_SYNC", "label": "Đồng bộ Cổng đối tác Ngân hàng mới", "channel": "Webhook + Admin"},
-    {"code": "WITHDRAW_PEAK", "label": "Cao điểm Rút tiền về tài khoản Ngân hàng", "channel": "Withdraw API"},
-    {"code": "RECON_BATCH", "label": "Chạy Batch Đối soát Sổ cái tự động", "channel": "Internal Cron"},
-    {"code": "OPEN_API", "label": "Lưu lượng Open Banking / Third-Party API", "channel": "Partner Gateway"},
-    {"code": "RED_TEAM", "label": "Diễn tập Red Team Đánh giá An ninh SOC", "channel": "Full Attack Surface"},
+# 15 realistic Vietnamese fintech operational contexts with real operational physics
+OPERATIONAL_CONTEXTS: list[dict[str, Any]] = [
+    {
+        "code": "PAYDAY",
+        "label": "Cao điểm Trả lương cuối tháng",
+        "channel": "Mobile App + Webhook",
+        "allowed_scale_tiers": ["high", "peak", "surge", "mega"],
+        "avg_tx_multiplier": 1.35,
+        "mttr_multiplier": 1.15,
+        "allow_blitz": True,
+    },
+    {
+        "code": "FLASHSALE",
+        "label": "Flash Sale Ví điện tử 12.12",
+        "channel": "Checkout Gateway",
+        "allowed_scale_tiers": ["peak", "surge", "mega"],
+        "avg_tx_multiplier": 0.9,
+        "mttr_multiplier": 1.25,
+        "allow_blitz": True,
+    },
+    {
+        "code": "EOD_SETTLE",
+        "label": "Đối soát Liên ngân hàng cuối ngày (EOD)",
+        "channel": "Internal Settlement",
+        "allowed_scale_tiers": ["standard", "high", "peak"],
+        "avg_tx_multiplier": 3.8,
+        "mttr_multiplier": 1.1,
+        "allow_blitz": False,
+    },
+    {
+        "code": "MERCHANT_T0",
+        "label": "Giải ngân Merchant T+0",
+        "channel": "Partner Webhook",
+        "allowed_scale_tiers": ["high", "peak", "surge"],
+        "avg_tx_multiplier": 2.4,
+        "mttr_multiplier": 1.0,
+        "allow_blitz": False,
+    },
+    {
+        "code": "BILL_PAY",
+        "label": "Cao điểm Thanh toán Hóa đơn Điện/Nước",
+        "channel": "Mobile API",
+        "allowed_scale_tiers": ["standard", "high", "peak", "surge"],
+        "avg_tx_multiplier": 0.4,
+        "mttr_multiplier": 1.0,
+        "allow_blitz": False,
+    },
+    {
+        "code": "CASHBACK",
+        "label": "Chiến dịch Hoàn tiền 20% Toàn sàn",
+        "channel": "Promo + Wallet API",
+        "allowed_scale_tiers": ["high", "peak", "surge", "mega"],
+        "avg_tx_multiplier": 0.75,
+        "mttr_multiplier": 1.2,
+        "allow_blitz": True,
+    },
+    {
+        "code": "NIGHT_SHIFT",
+        "label": "Ca trực đêm SOC (02:00 – 05:00)",
+        "channel": "All Endpoints",
+        "allowed_scale_tiers": ["standard", "high"],
+        "avg_tx_multiplier": 1.1,
+        "mttr_multiplier": 1.55,
+        "allow_blitz": False,
+    },
+    {
+        "code": "POST_DEPLOY",
+        "label": "Lưu lượng sau đợt Deploy bản vá mới",
+        "channel": "Public API",
+        "allowed_scale_tiers": ["standard", "high", "peak"],
+        "avg_tx_multiplier": 1.15,
+        "mttr_multiplier": 0.9,
+        "allow_blitz": True,
+    },
+    {
+        "code": "VIP_TIER",
+        "label": "Giao dịch nhóm Ví VIP & Doanh nghiệp",
+        "channel": "Enterprise API",
+        "allowed_scale_tiers": ["standard", "high", "peak"],
+        "avg_tx_multiplier": 3.2,
+        "mttr_multiplier": 0.95,
+        "allow_blitz": False,
+    },
+    {
+        "code": "CROSS_BORDER",
+        "label": "Chuyển tiền & Thanh toán Xuyên biên giới",
+        "channel": "FX + Webhook",
+        "allowed_scale_tiers": ["standard", "high", "peak"],
+        "avg_tx_multiplier": 3.5,
+        "mttr_multiplier": 1.2,
+        "allow_blitz": False,
+    },
+    {
+        "code": "PARTNER_SYNC",
+        "label": "Đồng bộ Cổng đối tác Ngân hàng mới",
+        "channel": "Webhook + Admin",
+        "allowed_scale_tiers": ["standard", "high", "peak"],
+        "avg_tx_multiplier": 1.9,
+        "mttr_multiplier": 1.1,
+        "allow_blitz": False,
+    },
+    {
+        "code": "WITHDRAW_PEAK",
+        "label": "Cao điểm Rút tiền về tài khoản Ngân hàng",
+        "channel": "Withdraw API",
+        "allowed_scale_tiers": ["high", "peak", "surge", "mega"],
+        "avg_tx_multiplier": 1.7,
+        "mttr_multiplier": 1.15,
+        "allow_blitz": True,
+    },
+    {
+        "code": "RECON_BATCH",
+        "label": "Chạy Batch Đối soát Sổ cái tự động",
+        "channel": "Internal Cron",
+        "allowed_scale_tiers": ["standard", "high"],
+        "avg_tx_multiplier": 2.8,
+        "mttr_multiplier": 1.25,
+        "allow_blitz": False,
+    },
+    {
+        "code": "OPEN_API",
+        "label": "Lưu lượng Open Banking / Third-Party API",
+        "channel": "Partner Gateway",
+        "allowed_scale_tiers": ["high", "peak", "surge", "mega"],
+        "avg_tx_multiplier": 1.5,
+        "mttr_multiplier": 1.1,
+        "allow_blitz": True,
+    },
+    {
+        "code": "RED_TEAM",
+        "label": "Diễn tập Red Team Đánh giá An ninh SOC",
+        "channel": "Full Attack Surface",
+        "allowed_scale_tiers": ["standard", "high", "peak", "surge", "mega"],
+        "avg_tx_multiplier": 1.6,
+        "mttr_multiplier": 0.8,
+        "allow_blitz": True,
+    },
 ]
+
+OPERATIONAL_CONTEXT_MAP: dict[str, dict[str, Any]] = {
+    c["code"]: c for c in OPERATIONAL_CONTEXTS
+}
 
 # 12 attack compositions (Single, Multi-Vector 2/3/4, Full 5-Vector Blitz)
 ATTACK_COMPOSITIONS: list[dict[str, Any]] = [
@@ -79,8 +203,8 @@ ATTACK_COMPOSITIONS: list[dict[str, Any]] = [
     },
     {
         "code": "WEBHOOK_PI",
-        "title": "Webhook Replay + Prompt Injection Ngụy trang",
-        "category": "multi_vector",
+        "title": "Webhook Replay (Kèm Defense Evasion: Prompt Injection)",
+        "category": "single_vector",
         "vectors": ["webhook_replay"],
         "with_prompt_injection": True,
         "severity": "CRITICAL",
@@ -111,15 +235,15 @@ ATTACK_COMPOSITIONS: list[dict[str, Any]] = [
     },
     {
         "code": "APT_TRIPLE",
-        "title": "Đa mũi nhọn 3 lớp: Webhook + BOLA + Prompt Injection",
+        "title": "Kill Chain 2 Mũi (BOLA Recon → Webhook Replay) + Defense Evasion PI",
         "category": "multi_vector",
-        "vectors": ["webhook_replay", "bola_idor"],
+        "vectors": ["bola_idor", "webhook_replay"],
         "with_prompt_injection": True,
         "severity": "CRITICAL",
     },
     {
         "code": "INSIDER_TRIPLE",
-        "title": "Đa mũi nhọn 3 lớp: Lộ Key + Race Condition + Prompt Injection",
+        "title": "Kill Chain 2 Mũi (Lộ Key → Race Condition) + Defense Evasion PI",
         "category": "multi_vector",
         "vectors": ["leaked_key", "race_condition"],
         "with_prompt_injection": True,
@@ -183,13 +307,15 @@ ATTACK_COMPOSITIONS: list[dict[str, Any]] = [
     },
 ]
 
-# 5 traffic scale tiers (15 * 12 * 5 = 900 scenarios)
+# 5 contiguous traffic scale tiers over a 15-minute SOC observation window (no gaps)
+SIMULATION_WINDOW_MINUTES = 15
+
 SCALE_TIERS: list[dict[str, Any]] = [
-    {"code": "standard", "label": "Ca chuẩn (2k – 5k GD)", "min_tx": 2200, "max_tx": 5000},
-    {"code": "high", "label": "Cao tải (8k – 15k GD)", "min_tx": 8000, "max_tx": 15000},
-    {"code": "peak", "label": "Giờ cao điểm (18k – 30k GD)", "min_tx": 18000, "max_tx": 30000},
-    {"code": "surge", "label": "Đột biến Payday (32k – 45k GD)", "min_tx": 32000, "max_tx": 45000},
-    {"code": "mega", "label": "Siêu tải Thực tế (46k – 60k GD)", "min_tx": 46000, "max_tx": 60000},
+    {"code": "standard", "label": "Ca chuẩn (2k – 5k GD / 15p · ~2–6 TPS)", "min_tx": 2000, "max_tx": 5000},
+    {"code": "high", "label": "Cao tải (5k – 15k GD / 15p · ~6–17 TPS)", "min_tx": 5000, "max_tx": 15000},
+    {"code": "peak", "label": "Giờ cao điểm (15k – 30k GD / 15p · ~17–33 TPS)", "min_tx": 15000, "max_tx": 30000},
+    {"code": "surge", "label": "Đột biến Payday (30k – 45k GD / 15p · ~33–50 TPS)", "min_tx": 30000, "max_tx": 45000},
+    {"code": "mega", "label": "Siêu tải Flash Sale (45k – 60k GD / 15p · ~50–67 TPS)", "min_tx": 45000, "max_tx": 60000},
 ]
 
 VECTOR_META: dict[str, dict[str, Any]] = {
@@ -470,21 +596,28 @@ _CATALOG_CACHE: Optional[list[dict[str, Any]]] = None
 
 
 def _build_catalog() -> list[dict[str, Any]]:
-    """Build deterministic 900-scenario catalog (15 contexts x 12 attack mixes x 5 scale tiers)."""
+    """Build realistic pruned scenario catalog honoring context scale & blitz constraints."""
     scenarios: list[dict[str, Any]] = []
     idx = 0
     for ctx in OPERATIONAL_CONTEXTS:
+        allowed_tiers = set(ctx["allowed_scale_tiers"])
+        allow_blitz = bool(ctx["allow_blitz"])
         for comp in ATTACK_COMPOSITIONS:
+            if comp["category"] == "red_team_blitz" and not allow_blitz:
+                continue
             for tier in SCALE_TIERS:
+                if tier["code"] not in allowed_tiers:
+                    continue
                 idx += 1
                 scn_id = f"SCN-{idx:04d}"
                 seed = int(hashlib.sha256(scn_id.encode("utf-8")).hexdigest()[:8], 16)
                 rng = random.Random(seed)
 
                 total_tx = rng.randint(tier["min_tx"], tier["max_tx"])
-                # Round to nearest 100 for clean readability
                 total_tx = max(1000, (total_tx // 100) * 100)
-                attack_ratio_pct = round(rng.uniform(0.6, 5.8), 2)
+                # Realistic low-and-slow business-logic attack ratio (0.15% – 1.80%)
+                attack_ratio_pct = round(rng.uniform(0.15, 1.80), 2)
+                tps = round(total_tx / (SIMULATION_WINDOW_MINUTES * 60), 1)
                 target_count = rng.randint(2, len(DEFAULT_WALLET_IDS))
                 target_wallets = sorted(rng.sample(DEFAULT_WALLET_IDS, k=target_count))
 
@@ -499,6 +632,10 @@ def _build_catalog() -> list[dict[str, Any]]:
                         "category": comp["category"],
                         "scale_tier": tier["code"],
                         "scale_label": tier["label"],
+                        "window_minutes": SIMULATION_WINDOW_MINUTES,
+                        "tps": tps,
+                        "avg_tx_multiplier": ctx["avg_tx_multiplier"],
+                        "mttr_multiplier": ctx["mttr_multiplier"],
                         "total_transactions": total_tx,
                         "attack_ratio_pct": attack_ratio_pct,
                         "estimated_attacks": max(15, int(total_tx * attack_ratio_pct / 100.0)),
@@ -507,10 +644,10 @@ def _build_catalog() -> list[dict[str, Any]]:
                         "severity": comp["severity"],
                         "target_wallets": target_wallets,
                         "description": (
-                            f"Mô phỏng {total_tx:,} giao dịch thực tế trong bối cảnh '{ctx['label']}' "
-                            f"({ctx['channel']}), trộn ngẫu nhiên ~{attack_ratio_pct}% lưu lượng tấn công "
-                            f"({', '.join(vectors)}"
-                            + (" + Indirect Prompt Injection" if comp["with_prompt_injection"] else "")
+                            f"Cửa sổ {SIMULATION_WINDOW_MINUTES} phút ({total_tx:,} GD · ~{tps} TPS) trong bối cảnh '{ctx['label']}' "
+                            f"(hệ số giá trị ×{ctx['avg_tx_multiplier']}, MTTR ×{ctx['mttr_multiplier']}), "
+                            f"trộn ~{attack_ratio_pct}% lưu lượng tấn công tinh vi ({', '.join(vectors)}"
+                            + (" + Defense Evasion: Prompt Injection" if comp["with_prompt_injection"] else "")
                             + f") nhắm vào {', '.join(target_wallets)}."
                         ),
                     }
@@ -708,15 +845,24 @@ def run_scale_simulation(
             "targeted_vectors": [],
         }
 
+    # Context-driven operational physics (transaction value & SOC MTTR multipliers)
+    ctx_code = scenario.get("context_code") if scenario else None
+    ctx_obj = OPERATIONAL_CONTEXT_MAP.get(str(ctx_code or ""), {})
+    avg_tx_mult = float(ctx_obj.get("avg_tx_multiplier", 1.0))
+    mttr_mult = float(ctx_obj.get("mttr_multiplier", 1.0))
+    tps = round(tx_count / (SIMULATION_WINDOW_MINUTES * 60), 1)
+
     # Simulate per-vector & per-account impact
     vector_breakdown: list[dict[str, Any]] = []
     total_loss_without_ai = 0
     total_loss_with_ai_live = 0
+    total_loss_with_ai_full = 0
     total_blocked_traditional = 0
     total_blocked_live = 0
     total_blocked_ai_extra_live = 0
     total_blocked_ai_extra_full = 0
     total_blocked_full = 0
+    total_leaked_full = 0
     total_records_leaked_without_ai = 0
     total_records_leaked_live = 0
 
@@ -725,41 +871,55 @@ def run_scale_simulation(
         ctype = meta["condition_type"]
         is_covered_live = ctype in active_condition_types
 
-        # Realistic Traditional Bank/Fintech Security (WAF + Static Rate Limit + Basic Auth):
-        # Already blocks ~48%-72% of naive/flood/invalid attacks, but misses sophisticated business-logic attacks.
+        # Realistic Traditional 5-Layer Bank Security (blocks ~64%-82%)
         trad_min, trad_max = meta["traditional_block_range"]
         blocked_by_traditional = max(1, int(round(attempts * rng.uniform(trad_min, trad_max))))
         blocked_by_traditional = min(blocked_by_traditional, max(0, attempts - 1))
         succeeded_without_ai = max(1, attempts - blocked_by_traditional)
 
-        # With FinSec AI Virtual Patching active on top of traditional security:
-        ai_extra_live = succeeded_without_ai if is_covered_live else 0
-        blocked_live = blocked_by_traditional + ai_extra_live
-        leaked_live = 0 if is_covered_live else succeeded_without_ai
-        ai_extra_full = succeeded_without_ai
-        blocked_full = attempts
+        # Realistic Enterprise AI Shield (98.5% – 99.8% total block rate, NOT rigid 100% perfectionism):
+        # Leaves a tiny residual (0.2% – 1.5% of total attempts) for SOC L2/L3 escalation on novel evasions.
+        residual_edge_cases = (
+            max(1, int(round(attempts * rng.uniform(0.003, 0.013))))
+            if attempts >= 40
+            else 0
+        )
+        residual_edge_cases = min(residual_edge_cases, max(0, succeeded_without_ai - 1))
 
-        # Compute financial loss / risk exposure ONLY from attacks that bypassed traditional security
+        ai_extra_full = max(0, succeeded_without_ai - residual_edge_cases)
+        blocked_full = blocked_by_traditional + ai_extra_full
+        leaked_full = residual_edge_cases
+
+        ai_extra_live = ai_extra_full if is_covered_live else 0
+        blocked_live = blocked_by_traditional + ai_extra_live
+        leaked_live = leaked_full if is_covered_live else succeeded_without_ai
+
+        # Compute financial loss scaled by operational context avg_tx_multiplier (e.g., VIP x3.2, BILL_PAY x0.4)
         if vec == "webhook_replay":
             effective_credits = max(2, succeeded_without_ai // 12)
-            loss_without_ai = effective_credits * rng.randint(1_200_000, 2_500_000)
+            base_loss = effective_credits * rng.randint(1_200_000, 2_500_000)
         elif vec == "race_condition":
             effective_drains = max(2, succeeded_without_ai // 14)
-            loss_without_ai = effective_drains * rng.randint(1_500_000, 3_000_000)
+            base_loss = effective_drains * rng.randint(1_500_000, 3_000_000)
         elif vec == "leaked_key":
-            loss_without_ai = max(1, succeeded_without_ai // 20) * meta["avg_loss_per_hit_vnd"]
-        else:  # bola_idor
-            loss_without_ai = max(1, succeeded_without_ai // 25) * meta["avg_loss_per_hit_vnd"]
+            base_loss = max(1, succeeded_without_ai // 20) * meta["avg_loss_per_hit_vnd"]
+        else:
+            base_loss = max(1, succeeded_without_ai // 25) * meta["avg_loss_per_hit_vnd"]
 
-        loss_live = 0 if is_covered_live else loss_without_ai
+        loss_without_ai = int(round(base_loss * avg_tx_mult / 10_000) * 10_000)
+        residual_ratio = (leaked_full / succeeded_without_ai) if succeeded_without_ai else 0.0
+        loss_full = int(round((loss_without_ai * residual_ratio) / 10_000) * 10_000)
+        loss_live = loss_full if is_covered_live else loss_without_ai
 
         total_loss_without_ai += loss_without_ai
         total_loss_with_ai_live += loss_live
+        total_loss_with_ai_full += loss_full
         total_blocked_traditional += blocked_by_traditional
         total_blocked_live += blocked_live
         total_blocked_ai_extra_live += ai_extra_live
         total_blocked_ai_extra_full += ai_extra_full
         total_blocked_full += blocked_full
+        total_leaked_full += leaked_full
 
         # Distribute impact NON-UNIFORMLY across target wallets based on realistic Fintech account roles
         impacted_wids = [wid for wid in target_wallet_ids if wid in account_map] or list(account_map.keys())
@@ -1014,6 +1174,11 @@ def run_scale_simulation(
         if total_attacks
         else 100.0
     )
+    full_block_rate = (
+        round((total_blocked_full / total_attacks) * 100.0, 2)
+        if total_attacks
+        else 100.0
+    )
     ai_gap_closed_live_pct = (
         round((total_blocked_ai_extra_live / total_attacks) * 100.0, 2)
         if total_attacks
@@ -1025,7 +1190,7 @@ def run_scale_simulation(
         else 0.0
     )
 
-    # Traditional 5-layer static bank security breakdown (WAF, Rate Limit, IAM/RBAC, App/DB Guards, Rule-Based SIEM)
+    # Traditional 5-layer static bank security breakdown
     layer_weights = [0.24, 0.22, 0.21, 0.19, 0.14]
     layer_names = [
         "WAF & API Schema",
@@ -1048,21 +1213,83 @@ def run_scale_simulation(
     # Rigid static WAF / aggressive IP rate-limit blocks ~0.35% - 1.05% of legitimate customers at peak load
     trad_fp_count = max(1, int(round(clean_transactions * rng.uniform(0.0035, 0.0105))))
     trad_fp_rate = round((trad_fp_count / clean_transactions) * 100.0, 2) if clean_transactions else 0.0
-    trad_mttr_minutes = rng.randint(90, 210)
+    # MTTR scaled by operational context (e.g., NIGHT_SHIFT x1.55 because L2/L3 engineers are on-call)
+    trad_mttr_minutes = int(round(rng.randint(90, 190) * mttr_mult))
+
+    # Realistic controlled AI False Positive rate (0.00% – 0.04%):
+    # At peak/surge/mega scale with CONCURRENCY_LOCK, a tiny fraction of bursty Payout Agent (W_1004)
+    # or flaky-network auto-retry requests may receive a soft HTTP 429 retry challenge.
+    has_race_rule_live = "CONCURRENCY_LOCK" in active_condition_types
+    ai_full_fp_count = (
+        max(1, int(round(clean_transactions * rng.uniform(0.0001, 0.00035))))
+        if (tx_count >= 15000 and "race_condition" in active_vectors)
+        else 0
+    )
+    ai_full_fp_rate = round((ai_full_fp_count / clean_transactions) * 100.0, 3) if clean_transactions else 0.0
+    ai_live_fp_count = ai_full_fp_count if (has_race_rule_live and live_rules) else (trad_fp_count if not live_rules else 0)
+    ai_live_fp_rate = round((ai_live_fp_count / clean_transactions) * 100.0, 3) if clean_transactions else 0.0
+
+    # Logical Kill Chain ordering across active vectors
+    kill_chain_stages: list[dict[str, str]] = []
+    recon_vecs = [v for v in active_vectors if v in ("bola_idor", "ssrf_callback", "credential_stuffing")]
+    exploit_vecs = [v for v in active_vectors if v in ("webhook_replay", "race_condition", "parameter_tampering", "leaked_key")]
+    if recon_vecs:
+        kill_chain_stages.append(
+            {
+                "phase": "1. Reconnaissance & Initial Access",
+                "detail": f"Dò tìm ví mục tiêu / tài nguyên nội bộ ({', '.join(recon_vecs)})",
+            }
+        )
+    if pi_enabled:
+        kill_chain_stages.append(
+            {
+                "phase": "Defense Evasion (Né tránh SOC)",
+                "detail": "Chèn Indirect Prompt Injection vào log/User-Agent nhằm đánh lừa AI SOC (bị sanitizer.py vô hiệu hóa)",
+            }
+        )
+    if exploit_vecs:
+        kill_chain_stages.append(
+            {
+                "phase": "Financial Exploitation & Exfiltration",
+                "detail": f"Khai thác trực tiếp dòng tiền / dữ liệu đối soát ({', '.join(exploit_vecs)})",
+            }
+        )
+
+    ai_residual_note = (
+        f"Có kiểm soát sai số thực tế: {total_leaked_full} request biến thể hiếm được chuyển SOC L2/L3 review"
+        + (
+            f"; {ai_full_fp_count} giao dịch retry liên tiếp (Đại lý W_1004 / mạng chập chờn) nhận soft-challenge HTTP 429 ({ai_full_fp_rate}%)."
+            if ai_full_fp_count > 0
+            else "; 0 chặn nhầm khách hàng hợp lệ."
+        )
+    )
 
     return {
         "scenario": scenario
         or {
             "id": "SCN-CUSTOM",
-            "name": f"Kịch bản Tùy chỉnh ({tx_count:,} giao dịch · {len(active_vectors)} mũi tấn công)",
+            "name": f"Kịch bản Tùy chỉnh ({tx_count:,} giao dịch / {SIMULATION_WINDOW_MINUTES}p · {len(active_vectors)} mũi tấn công)",
             "context": "Tùy chỉnh bởi SOC Analyst",
             "category": "red_team_blitz" if len(active_vectors) >= 4 else ("multi_vector" if len(active_vectors) > 1 else "single_vector"),
             "scale_tier": "custom",
+            "window_minutes": SIMULATION_WINDOW_MINUTES,
+            "tps": tps,
+            "avg_tx_multiplier": avg_tx_mult,
+            "mttr_multiplier": mttr_mult,
             "total_transactions": tx_count,
             "vectors": active_vectors,
             "with_prompt_injection": pi_enabled,
         },
+        "simulation_mode": "statistical_ab_with_live_db_sample",
         "simulation_time_ms": elapsed_ms,
+        "window_minutes": SIMULATION_WINDOW_MINUTES,
+        "tps": tps,
+        "context_physics": {
+            "avg_tx_multiplier": avg_tx_mult,
+            "mttr_multiplier": mttr_mult,
+        },
+        "kill_chain_stages": kill_chain_stages,
+        "ai_residual_note": ai_residual_note,
         "total_transactions": tx_count,
         "clean_transactions": clean_transactions,
         "attack_transactions": total_attacks,
@@ -1095,9 +1322,9 @@ def run_scale_simulation(
             "financial_saved_vnd": max(0, total_loss_without_ai - total_loss_with_ai_live),
             "compromised_accounts": compromised_live_count,
             "records_leaked": total_records_leaked_live,
-            "clean_transactions_preserved": clean_transactions,
-            "false_positives": 0,
-            "false_positive_rate_pct": 0.0,
+            "clean_transactions_preserved": max(0, clean_transactions - ai_live_fp_count),
+            "false_positives": ai_live_fp_count,
+            "false_positive_rate_pct": ai_live_fp_rate,
             "mttr_minutes": 1,
             "avg_middleware_latency_ms": round(rng.uniform(1.3, 2.8), 2),
             "prompt_injection_status": "IMMUNE (sanitizer.py cô lập 100%)" if pi_enabled else "N/A",
@@ -1106,15 +1333,15 @@ def run_scale_simulation(
             "attacks_blocked": total_blocked_full,
             "ai_extra_blocked": total_blocked_ai_extra_full,
             "ai_gap_closed_pct": ai_gap_closed_full_pct,
-            "attacks_leaked": 0,
-            "block_rate_pct": 100.0,
-            "financial_loss_vnd": 0,
-            "financial_saved_vnd": total_loss_without_ai,
+            "attacks_leaked": total_leaked_full,
+            "block_rate_pct": full_block_rate,
+            "financial_loss_vnd": total_loss_with_ai_full,
+            "financial_saved_vnd": max(0, total_loss_without_ai - total_loss_with_ai_full),
             "compromised_accounts": 0,
             "records_leaked": 0,
-            "clean_transactions_preserved": clean_transactions,
-            "false_positives": 0,
-            "false_positive_rate_pct": 0.0,
+            "clean_transactions_preserved": max(0, clean_transactions - ai_full_fp_count),
+            "false_positives": ai_full_fp_count,
+            "false_positive_rate_pct": ai_full_fp_rate,
             "mttr_minutes": 1,
             "avg_middleware_latency_ms": round(rng.uniform(1.4, 2.6), 2),
             "prompt_injection_status": "IMMUNE (sanitizer.py cô lập 100%)" if pi_enabled else "N/A",
