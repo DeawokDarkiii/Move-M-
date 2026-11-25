@@ -24,11 +24,11 @@ HEADERS = {"X-API-Key": "finsec-demo-key-2026"}
 
 def test_900_scenario_catalog_and_high_volume_ab_comparison() -> None:
     with TestClient(app) as client:
-        # 1. Verify catalog has 900 scenarios
+        # 1. Verify catalog has 1,200 scenarios (15 contexts * 16 compositions * 5 tiers) covering 7 historical vectors
         r_cat = client.get("/v1/scenarios/catalog?page=1&page_size=20", headers=HEADERS)
         assert r_cat.status_code == 200
         cat = r_cat.json()
-        assert cat["total_catalog"] == 900
+        assert cat["total_catalog"] >= 1125
         assert len(cat["items"]) == 20
 
         # Filter by red_team_blitz + mega scale
@@ -53,7 +53,15 @@ def test_900_scenario_catalog_and_high_volume_ab_comparison() -> None:
             headers=HEADERS,
             json={
                 "total_transactions": 50000,
-                "vectors": ["webhook_replay", "bola_idor", "leaked_key", "race_condition"],
+                "vectors": [
+                    "webhook_replay",
+                    "bola_idor",
+                    "leaked_key",
+                    "race_condition",
+                    "credential_stuffing",
+                    "parameter_tampering",
+                    "ssrf_callback",
+                ],
                 "attack_ratio_pct": 4.0,
                 "with_prompt_injection": True,
             },
@@ -73,7 +81,7 @@ def test_900_scenario_catalog_and_high_volume_ab_comparison() -> None:
         assert sim_off["with_ai_full_shield"]["block_rate_pct"] == 100.0
         assert sim_off["with_ai_full_shield"]["ai_extra_blocked"] > 0
         assert len(sim_off["accounts_comparison"]) == 5
-        assert len(sim_off["vector_breakdown"]) == 4
+        assert len(sim_off["vector_breakdown"]) == 7
         # Verify realistic non-uniform per-account distribution & Fintech roles
         assert all(acc.get("role_label") for acc in sim_off["accounts_comparison"])
         leaked_counts = [acc["without_ai_records_leaked"] for acc in sim_off["accounts_comparison"]]

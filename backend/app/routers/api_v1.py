@@ -321,7 +321,7 @@ async def get_sandbox_state(
         for inc in db.list_incidents(limit=10)
     ]
     recent_logs = db.get_recent_non_baseline_logs(limit=25)
-    clean_baseline_count = len(db.get_clean_baseline_logs(limit=500))
+    clean_baseline_count = len(db.get_clean_baseline_logs(limit=2500))
     settings = get_settings()
 
     return {

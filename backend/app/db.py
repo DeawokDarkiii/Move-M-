@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from app.config import get_settings
-from app.seed import INITIAL_WALLETS, generate_clean_baseline_logs
+from app.seed import DEFAULT_BASELINE_COUNT, INITIAL_WALLETS, generate_clean_baseline_logs
 
 SQLITE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS wallets (
@@ -157,10 +157,18 @@ class DatabaseClient:
                     self._upsert_wallet(w)
                     seeded_wallets += 1
 
-            clean_logs = self.get_clean_baseline_logs(limit=5)
+            clean_logs = self.get_clean_baseline_logs(limit=DEFAULT_BASELINE_COUNT + 100)
             seeded_logs = 0
-            if not clean_logs:
-                baseline_rows = generate_clean_baseline_logs(300)
+            if len(clean_logs) < DEFAULT_BASELINE_COUNT:
+                # Replace legacy 300-row baseline with full 2,000-row multi-endpoint baseline
+                if clean_logs:
+                    if self._mode == "supabase":
+                        self._supabase.table("api_logs").delete().eq("is_clean_baseline", True).execute()
+                    else:
+                        with self._lock, self._sqlite_conn() as conn:
+                            conn.execute("DELETE FROM api_logs WHERE is_clean_baseline = 1")
+                            conn.commit()
+                baseline_rows = generate_clean_baseline_logs(DEFAULT_BASELINE_COUNT)
                 seeded_logs = self.insert_api_logs_bulk(baseline_rows)
 
             return {
@@ -499,7 +507,27 @@ class DatabaseClient:
             rows = conn.execute(sql, params).fetchall()
             return [self._normalize_log_row(dict(r)) for r in rows]
 
-    def get_clean_baseline_logs(self, limit: int = 500) -> list[dict[str, Any]]:
+    def get_clean_baseline_logs(self, limit: int = 2500) -> list[dict[str, Any]]:
+        if self._mode == "supabase" and limit > 1000:
+            all_rows: list[dict[str, Any]] = []
+            page_size = 1000
+            offset = 0
+            while len(all_rows) < limit:
+                end = min(offset + page_size - 1, limit - 1)
+                res = (
+                    self._supabase.table("api_logs")
+                    .select("*")
+                    .eq("is_clean_baseline", True)
+                    .order("created_at", desc=True)
+                    .range(offset, end)
+                    .execute()
+                )
+                batch = [self._normalize_log_row(r) for r in (res.data or [])]
+                all_rows.extend(batch)
+                if len(batch) < page_size:
+                    break
+                offset += page_size
+            return all_rows
         return self.query_api_logs(is_clean_baseline=True, limit=limit)
 
     def get_recent_non_baseline_logs(self, limit: int = 50) -> list[dict[str, Any]]:
@@ -727,9 +755,11 @@ class DatabaseClient:
             self._supabase.table("incidents").delete().neq("id", "").execute()
             for w in INITIAL_WALLETS:
                 self._upsert_wallet(w)
-            clean_count = len(self.get_clean_baseline_logs(limit=500))
-            if clean_count == 0:
-                clean_count = self.insert_api_logs_bulk(generate_clean_baseline_logs(300))
+            clean_count = len(self.get_clean_baseline_logs(limit=DEFAULT_BASELINE_COUNT + 100))
+            if clean_count < DEFAULT_BASELINE_COUNT:
+                if clean_count > 0:
+                    self._supabase.table("api_logs").delete().eq("is_clean_baseline", True).execute()
+                clean_count = self.insert_api_logs_bulk(generate_clean_baseline_logs(DEFAULT_BASELINE_COUNT))
             return {
                 "status": "reset_complete",
                 "wallets_restored": len(INITIAL_WALLETS),
@@ -757,8 +787,12 @@ class DatabaseClient:
             ).fetchone()
             clean_count = int(row["cnt"]) if row else 0
 
-        if clean_count == 0:
-            clean_count = self.insert_api_logs_bulk(generate_clean_baseline_logs(300))
+        if clean_count < DEFAULT_BASELINE_COUNT:
+            if clean_count > 0:
+                with self._lock, self._sqlite_conn() as conn:
+                    conn.execute("DELETE FROM api_logs WHERE is_clean_baseline = 1")
+                    conn.commit()
+            clean_count = self.insert_api_logs_bulk(generate_clean_baseline_logs(DEFAULT_BASELINE_COUNT))
 
         return {
             "status": "reset_complete",

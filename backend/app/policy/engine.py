@@ -32,6 +32,9 @@ SUPPORTED_CONDITIONS = {
     "IP_WHITELIST_FOR_KEY",
     "CONCURRENCY_LOCK",
     "IP_BLOCKLIST",
+    "AUTH_VELOCITY_GUARD",
+    "BLOCK_FORBIDDEN_FIELDS",
+    "BLOCK_INTERNAL_URL",
 }
 
 
@@ -45,6 +48,9 @@ class RuleSpec(BaseModel):
         "IP_WHITELIST_FOR_KEY",
         "CONCURRENCY_LOCK",
         "IP_BLOCKLIST",
+        "AUTH_VELOCITY_GUARD",
+        "BLOCK_FORBIDDEN_FIELDS",
+        "BLOCK_INTERNAL_URL",
     ]
     params: dict[str, Any] = Field(default_factory=dict)
     action: Literal["BLOCK_403", "BLOCK_429"] = "BLOCK_403"
@@ -282,6 +288,60 @@ def evaluate_rule(
         blocked_cidrs = params.get("blocked_cidrs") or []
         return _ip_in_cidrs(ip_address, [*blocked_ips, *blocked_cidrs])
 
+    # 6. AUTH_VELOCITY_GUARD (Credential Stuffing / ATO & OTP Brute-Force)
+    if spec.condition_type == "AUTH_VELOCITY_GUARD":
+        blocked_ips = params.get("block_ips") or []
+        if blocked_ips and _ip_in_cidrs(ip_address, blocked_ips):
+            return True
+        if body.get("mfa_verified") is False or body.get("device_trusted") is False:
+            return True
+        window_seconds = float(params.get("window_seconds", 5.0))
+        lock_key = f"auth:{ip_address}"
+        if state is not None:
+            last_seen_map: dict[str, float] = state.setdefault("auth_last_seen", {})
+            ts = _parse_iso_timestamp(req_context.get("created_at"))
+            if ts is not None:
+                prev_ts = last_seen_map.get(lock_key)
+                if prev_ts is not None and abs(ts - prev_ts) < window_seconds:
+                    return True
+                last_seen_map[lock_key] = ts
+        return False
+
+    # 7. BLOCK_FORBIDDEN_FIELDS (Parameter Tampering / Mass Assignment)
+    if spec.condition_type == "BLOCK_FORBIDDEN_FIELDS":
+        forbidden = set(
+            params.get("forbidden_fields")
+            or ["role", "is_admin", "fee_override", "discount_pct", "is_verified"]
+        )
+        if any(k in body for k in forbidden):
+            return True
+        if params.get("reject_non_positive_amount", True) and "amount" in body:
+            try:
+                if float(body["amount"]) <= 0:
+                    return True
+            except (TypeError, ValueError):
+                return True
+        return False
+
+    # 8. BLOCK_INTERNAL_URL (SSRF Protection — blocks AWS IMDS, localhost, RFC1918)
+    if spec.condition_type == "BLOCK_INTERNAL_URL":
+        url_field = str(params.get("url_field") or "callback_url")
+        raw_url = str(body.get(url_field) or "").strip().lower()
+        if not raw_url:
+            return False
+        blocked_patterns = (
+            "169.254.169.254",
+            "metadata.google.internal",
+            "127.0.0.1",
+            "localhost",
+            "://10.",
+            "://192.168.",
+            "://172.16.",
+            "file://",
+            "gopher://",
+        )
+        return any(pat in raw_url for pat in blocked_patterns)
+
     return False
 
 
@@ -319,7 +379,7 @@ def dry_run_policy_rule(
     wallet_owners = {w["id"]: w["owner_id"] for w in db.get_wallets()}
 
     # 1. Evaluate against ALL clean baseline logs (ordered chronologically ascending)
-    clean_logs = db.get_clean_baseline_logs(limit=500)
+    clean_logs = db.get_clean_baseline_logs(limit=2500)
     clean_logs_sorted = sorted(
         clean_logs, key=lambda r: str(r.get("created_at") or "")
     )

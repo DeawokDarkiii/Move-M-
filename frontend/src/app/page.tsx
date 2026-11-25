@@ -11,7 +11,6 @@ import {
   Database,
   ExternalLink,
   FileText,
-  Layers,
   RefreshCw,
   RotateCcw,
   ShieldAlert,
@@ -23,7 +22,6 @@ import {
 import { AiComparisonOverview } from "@/components/AiComparisonOverview";
 import { DiffViewer } from "@/components/DiffViewer";
 import { IncidentAnalysisReport } from "@/components/IncidentAnalysisReport";
-import { ScenarioCatalogExplorer } from "@/components/ScenarioCatalogExplorer";
 import { SiemLogsAndRulesTab } from "@/components/SiemLogsAndRulesTab";
 import {
   API_BASE_URL,
@@ -42,7 +40,7 @@ import {
   triggerSimulation,
 } from "@/lib/api";
 
-type WorkspaceView = "overview" | "scenarios" | "investigation";
+type WorkspaceView = "overview" | "investigation";
 type RightTab = "report" | "policy" | "siem" | "diff" | "api";
 
 const SEVERITY_STYLES: Record<string, string> = {
@@ -297,7 +295,7 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/enforce" \\
                   FinSec Agent — AI SOC &amp; Virtual Patching Console
                 </h1>
                 <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-300 border border-emerald-500/30">
-                  900 SCENARIOS · LIVE
+                  1.125 SCENARIOS · 2.000 BASELINE
                 </span>
               </div>
               <p className="text-xs text-slate-400">
@@ -358,9 +356,9 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/enforce" \\
           </div>
         </div>
 
-        {/* Clean 3-Tab Primary SOC Navigation */}
+        {/* Clean 2-Workspace Primary SOC Navigation (No duplicate scenario tabs, no step numbering) */}
         <div className="mx-auto max-w-[1520px] px-4 pb-2.5">
-          <nav className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 rounded-xl border border-slate-800 bg-[#060a12] p-1 text-xs">
+          <nav className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 rounded-xl border border-slate-800 bg-[#060a12] p-1 text-xs">
             <button
               onClick={() => setView("overview")}
               className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 font-bold transition ${
@@ -370,18 +368,7 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/enforce" \\
               }`}
             >
               <ShieldCheck className="h-4 w-4" />
-              1. So sánh AI vs Truyền thống
-            </button>
-            <button
-              onClick={() => setView("scenarios")}
-              className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 font-bold transition ${
-                view === "scenarios"
-                  ? "bg-indigo-500/20 text-indigo-200 border border-indigo-500/40 shadow"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              <Layers className="h-4 w-4" />
-              2. Kho 900 Kịch bản (10k–100k GD)
+              Giám sát &amp; So sánh Phòng thủ (7 Vector Lịch sử)
             </button>
             <button
               onClick={() => setView("investigation")}
@@ -392,7 +379,7 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/enforce" \\
               }`}
             >
               <Cpu className="h-4 w-4" />
-              3. Điều tra AI SOC, Báo cáo &amp; Log SIEM
+              Điều tra AI SOC, Báo cáo &amp; Log SIEM
               {(state?.recent_logs.length ?? 0) > 0 && (
                 <span className="rounded-full bg-emerald-500/25 px-1.5 py-0.5 text-[10px] font-mono">
                   {state?.recent_logs.length}
@@ -418,38 +405,27 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/enforce" \\
           </div>
         )}
 
-        {/* VIEW 1: BEFORE / AFTER AI COMPARISON OVERVIEW */}
+        {/* PRIMARY WORKSPACE: MONITORING, SCENARIO RUNNER & A/B DEFENSE COMPARISON */}
         {view === "overview" && (
           <AiComparisonOverview
             scaleResult={scaleResult}
             wallets={state?.wallets || []}
             activeRulesCount={state?.active_rules_count ?? 0}
             loadingAction={loadingAction}
-            onRunRandomScenario={() =>
-              handleRunScaleScenario({ scenario_id: "random" })
-            }
+            onRunScenario={handleRunScaleScenario}
             onToggleAiShield={handleToggleAiShield}
             onInvestigate={handleInvestigate}
-            onOpenCatalog={() => setView("scenarios")}
           />
         )}
 
-        {/* VIEW 2: 900-SCENARIO EXPLORER & CUSTOM SCALE RUNNER */}
-        {view === "scenarios" && (
-          <ScenarioCatalogExplorer
-            loadingAction={loadingAction}
-            onRunScenario={handleRunScaleScenario}
-          />
-        )}
-
-        {/* VIEW 3: AI SOC INVESTIGATION, DRY-RUN & REPORT EXPORT */}
+        {/* ANALYST WORKSPACE: AI SOC INVESTIGATION, DRY-RUN (2,000 BASELINE), REPORTS & SIEM */}
         {view === "investigation" && (
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-800 bg-[#0d1424]/95 px-4 py-3">
               <div>
-                <h2 className="text-sm font-bold text-white">
-                  Bàn làm việc Điều tra AI SOC (ReAct Loop · Dry-Run 300 Baseline · Xuất Báo cáo)
-                </h2>
+                  <h2 className="text-sm font-bold text-white">
+                    Bàn làm việc Điều tra AI SOC (ReAct · Dry-Run {(state?.clean_baseline_count ?? 2000).toLocaleString("vi-VN")} mẫu sạch · Báo cáo)
+                  </h2>
                 <p className="text-xs text-slate-400">
                   AI đọc log live trong DB, đối chiếu sổ cái ví, kiểm định bán kính ảnh hưởng (0% chặn nhầm) và đề xuất luật vá nóng + bản vá code.
                 </p>
@@ -617,7 +593,7 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/enforce" \\
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                        Kiểm định Dry-Run (Chạy thật trên {state?.clean_baseline_count ?? 300} giao dịch sạch)
+                        Kiểm định Dry-Run (Tập mẫu đại diện {(state?.clean_baseline_count ?? 2000).toLocaleString("vi-VN")} giao dịch sạch / 7 endpoints)
                       </span>
                       {dryRun && (
                         <span
@@ -700,12 +676,12 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/enforce" \\
                       </div>
                     ) : (
                       <p className="text-xs text-slate-500">
-                        Chạy AI SOC Điều tra để kiểm chứng luật phòng thủ trên 300 giao dịch sạch lịch sử.
+                        Chạy AI SOC Điều tra để kiểm chứng luật phòng thủ trên {(state?.clean_baseline_count ?? 2000).toLocaleString("vi-VN")} mẫu giao dịch sạch đại diện trong DB.
                       </p>
                     )}
                   </div>
 
-                  {/* 5 Sub-Tabs inside SOC Workbench */}
+                  {/* 5 Natural Sub-Tabs inside SOC Workbench */}
                   <div className="grid grid-cols-2 sm:grid-cols-5 gap-1 rounded-xl border border-slate-800 bg-[#070b14] p-1 text-[11px]">
                     <button
                       onClick={() => setActiveTab("report")}
@@ -716,7 +692,7 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/enforce" \\
                       }`}
                     >
                       <FileText className="h-3.5 w-3.5" />
-                      1. Báo cáo
+                      Báo cáo SOC
                     </button>
                     <button
                       onClick={() => setActiveTab("policy")}
@@ -727,7 +703,7 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/enforce" \\
                       }`}
                     >
                       <ShieldCheck className="h-3.5 w-3.5" />
-                      2. Patch
+                      Virtual Patch
                     </button>
                     <button
                       onClick={() => setActiveTab("siem")}
@@ -738,7 +714,7 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/enforce" \\
                       }`}
                     >
                       <Activity className="h-3.5 w-3.5" />
-                      3. Log &amp; Luật
+                      Log &amp; Luật
                     </button>
                     <button
                       onClick={() => setActiveTab("diff")}
@@ -749,7 +725,7 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/enforce" \\
                       }`}
                     >
                       <Code2 className="h-3.5 w-3.5" />
-                      4. Hotfix
+                      Hotfix Diff
                     </button>
                     <button
                       onClick={() => setActiveTab("api")}
@@ -760,7 +736,7 @@ curl -X POST "${API_BASE_URL}/v1/policies/${ruleId}/enforce" \\
                       }`}
                     >
                       <Terminal className="h-3.5 w-3.5" />
-                      5. API
+                      API &amp; cURL
                     </button>
                   </div>
 

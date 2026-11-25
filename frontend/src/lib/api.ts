@@ -25,7 +25,10 @@ export interface RuleSpec {
     | "ENFORCE_OWNER_MATCH"
     | "IP_WHITELIST_FOR_KEY"
     | "CONCURRENCY_LOCK"
-    | "IP_BLOCKLIST";
+    | "IP_BLOCKLIST"
+    | "AUTH_VELOCITY_GUARD"
+    | "BLOCK_FORBIDDEN_FIELDS"
+    | "BLOCK_INTERNAL_URL";
   params: Record<string, unknown>;
   action: "BLOCK_403" | "BLOCK_429";
   reason: string;
@@ -361,6 +364,7 @@ export interface VectorBreakdownItem {
   loss_prevented_full_vnd: number;
   rule_currently_active: boolean;
   block_http_code: number;
+  historical_case?: string;
   traditional_gap_reason?: string;
 }
 

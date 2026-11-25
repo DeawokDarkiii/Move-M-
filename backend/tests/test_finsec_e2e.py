@@ -48,7 +48,7 @@ def test_01_seed_and_auth_guard(client: TestClient):
     r = client.get("/v1/sandbox/state", headers=HEADERS)
     assert r.status_code == 200
     data = r.json()
-    assert data["clean_baseline_count"] == 300
+    assert data["clean_baseline_count"] == 2000
     assert len(data["wallets"]) == 5
     assert all(w["balance"] == 10_000_000 for w in data["wallets"])
 
@@ -79,7 +79,7 @@ def test_02_webhook_replay_with_prompt_injection_and_virtual_patch(client: TestC
     assert len(report["prompt_injection_evidence"]) >= 1
     assert len(report["reasoning_trace"]) >= 3
     assert report["proposed_rule"]["rule_spec"]["condition_type"] == "DEDUP_BODY_FIELD"
-    assert report["dry_run_report"]["total_clean"] == 300
+    assert report["dry_run_report"]["total_clean"] == 2000
     assert report["dry_run_report"]["blocked_clean"] == 0
     assert report["dry_run_report"]["attack_blocked"] is True
 
@@ -119,7 +119,7 @@ def test_03_bola_idor_full_lifecycle(client: TestClient):
     inv = client.post("/v1/incidents/investigate", headers=HEADERS, json={})
     report = inv.json()
     assert report["proposed_rule"]["rule_spec"]["condition_type"] == "ENFORCE_OWNER_MATCH"
-    assert report["dry_run_report"]["total_clean"] == 300
+    assert report["dry_run_report"]["total_clean"] == 2000
     assert report["dry_run_report"]["blocked_clean"] == 0
     assert report["dry_run_report"]["attack_blocked_rate"] == 100.0
 
@@ -145,7 +145,7 @@ def test_04_leaked_internal_key_full_lifecycle(client: TestClient):
     inv = client.post("/v1/incidents/investigate", headers=HEADERS, json={})
     report = inv.json()
     assert report["proposed_rule"]["rule_spec"]["condition_type"] == "IP_WHITELIST_FOR_KEY"
-    assert report["dry_run_report"]["total_clean"] == 300
+    assert report["dry_run_report"]["total_clean"] == 2000
     assert report["dry_run_report"]["blocked_clean"] == 0
     assert report["dry_run_report"]["attack_blocked_rate"] == 100.0
 
@@ -172,7 +172,7 @@ def test_05_race_condition_and_reset_preserves_baseline(client: TestClient):
     inv = client.post("/v1/incidents/investigate", headers=HEADERS, json={})
     report = inv.json()
     assert report["proposed_rule"]["rule_spec"]["condition_type"] == "CONCURRENCY_LOCK"
-    assert report["dry_run_report"]["total_clean"] == 300
+    assert report["dry_run_report"]["total_clean"] == 2000
     assert report["dry_run_report"]["blocked_clean"] == 0
     assert report["dry_run_report"]["attack_blocked"] is True
 
@@ -185,8 +185,8 @@ def test_05_race_condition_and_reset_preserves_baseline(client: TestClient):
     # Reset sandbox -> restores wallets and preserves all 300 clean baseline rows
     reset = client.post("/v1/sandbox/reset", headers=HEADERS)
     assert reset.status_code == 200
-    assert reset.json()["clean_baseline_preserved"] == 300
+    assert reset.json()["clean_baseline_preserved"] == 2000
     state = client.get("/v1/sandbox/state", headers=HEADERS).json()
     assert all(w["balance"] == 10_000_000 for w in state["wallets"])
     assert state["active_rules_count"] == 0
-    assert state["clean_baseline_count"] == 300
+    assert state["clean_baseline_count"] == 2000

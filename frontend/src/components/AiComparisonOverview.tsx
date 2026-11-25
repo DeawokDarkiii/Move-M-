@@ -1,11 +1,14 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Cpu,
+  History,
   Layers,
   ShieldAlert,
   ShieldCheck,
@@ -15,16 +18,22 @@ import {
   Wallet as WalletIcon,
 } from "lucide-react";
 import { formatVnd, ScaleSimulationResponse, Wallet } from "@/lib/api";
+import { ScenarioCatalogExplorer } from "@/components/ScenarioCatalogExplorer";
 
 interface AiComparisonOverviewProps {
   scaleResult: ScaleSimulationResponse | null;
   wallets: Wallet[];
   activeRulesCount: number;
   loadingAction: string | null;
-  onRunRandomScenario: () => void;
+  onRunScenario: (payload: {
+    scenario_id?: string;
+    total_transactions?: number;
+    vectors?: string[];
+    attack_ratio_pct?: number;
+    with_prompt_injection?: boolean;
+  }) => void;
   onToggleAiShield: (enabled: boolean) => void;
   onInvestigate: () => void;
-  onOpenCatalog: () => void;
 }
 
 const ACCOUNT_STATUS_BADGE: Record<string, { label: string; cls: string }> = {
@@ -55,12 +64,12 @@ export function AiComparisonOverview({
   wallets,
   activeRulesCount,
   loadingAction,
-  onRunRandomScenario,
+  onRunScenario,
   onToggleAiShield,
   onInvestigate,
-  onOpenCatalog,
 }: AiComparisonOverviewProps) {
-  const aiShieldOn = activeRulesCount >= 4;
+  const [showCatalog, setShowCatalog] = useState(false);
+  const aiShieldOn = activeRulesCount >= 7;
   const liveView = scaleResult?.with_ai_live;
   const fullView = scaleResult?.with_ai_full_shield;
   const noAi = scaleResult?.without_ai;
@@ -69,22 +78,32 @@ export function AiComparisonOverview({
   const showingProjected = scaleResult ? scaleResult.active_rules_count === 0 : false;
   const aiDisplay = showingProjected ? fullView : liveView;
 
+  const handleSelectAndRun = (payload: {
+    scenario_id?: string;
+    total_transactions?: number;
+    vectors?: string[];
+    attack_ratio_pct?: number;
+    with_prompt_injection?: boolean;
+  }) => {
+    setShowCatalog(false);
+    onRunScenario(payload);
+  };
+
   return (
     <div className="space-y-5">
-      {/* Guided SOC Control Strip: 1-Click AI Shield Toggle + Random Scale Run + AI Investigate */}
-      <div className="rounded-2xl border border-slate-800 bg-[#0d1424]/95 p-4 shadow-xl space-y-4">
+      {/* Unified SOC Command Bar (No duplicate tabs, no artificial step numbering) */}
+      <div className="rounded-2xl border border-slate-800 bg-[#0d1424]/95 p-4 shadow-xl space-y-3.5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-bold text-white flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-sky-400" />
-              Trung tâm So sánh Thực chiến: Không có AI vs Có FinSec AI Bảo vệ
+              Giám sát Thực chiến: Bảo mật Truyền thống (5 lớp) vs +FinSec AI
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Chạy đồng thời hàng chục nghìn giao dịch thật trộn nhiều mũi tấn công ngẫu nhiên và theo dõi chênh lệch từng tài khoản ví.
+              Phân phối lưu lượng 2.000 – 100.000 giao dịch kết hợp 7 kiểu tấn công lịch sử và so sánh trực tiếp trên 5 nhóm tài khoản hệ thống.
             </p>
           </div>
 
-          {/* 1-Click AI Shield Toggle */}
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => onToggleAiShield(!aiShieldOn)}
@@ -98,72 +117,68 @@ export function AiComparisonOverview({
               {aiShieldOn ? (
                 <>
                   <ShieldCheck className="h-4 w-4 text-emerald-400" />
-                  Lá chắn AI: ĐANG BẬT ({activeRulesCount} luật) — Bấm để Tắt
+                  Lá chắn AI: ĐANG BẬT ({activeRulesCount} luật)
                 </>
               ) : (
                 <>
                   <ShieldOff className="h-4 w-4 text-rose-400" />
-                  Lá chắn AI: ĐANG TẮT ({activeRulesCount}/4 luật) — Bấm Bật Ngay
+                  Lá chắn AI: ĐANG TẮT ({activeRulesCount}/7 luật) — Bật ngay
                 </>
               )}
             </button>
           </div>
         </div>
 
-        {/* 3 Clear Action Steps */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+        {/* Clean Action Toolbar */}
+        <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={onRunRandomScenario}
+            onClick={() => handleSelectAndRun({ scenario_id: "random" })}
             disabled={loadingAction !== null}
-            className="flex items-center justify-between rounded-xl border border-sky-500/40 bg-sky-500/15 px-3.5 py-2.5 text-left hover:bg-sky-500/25 transition disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-500 px-4 py-2 text-xs font-bold text-white shadow hover:from-sky-400 hover:to-indigo-400 transition disabled:opacity-50"
           >
-            <div>
-              <div className="text-[11px] font-bold text-sky-300 uppercase tracking-wider">
-                Bước 1 · Mô phỏng Quy mô lớn
-              </div>
-              <div className="text-xs font-semibold text-white mt-0.5">
-                {loadingAction === "scale"
-                  ? "Đang chạy hàng chục nghìn giao dịch..."
-                  : "Chạy Ngẫu nhiên từ Kho 900 Kịch bản"}
-              </div>
-            </div>
-            <Shuffle className="h-4 w-4 text-sky-300 shrink-0" />
+            <Shuffle className="h-3.5 w-3.5" />
+            {loadingAction === "scale"
+              ? "Đang mô phỏng..."
+              : "Chạy Kịch bản Ngẫu nhiên"}
           </button>
 
           <button
-            onClick={onOpenCatalog}
-            className="flex items-center justify-between rounded-xl border border-indigo-500/40 bg-indigo-500/15 px-3.5 py-2.5 text-left hover:bg-indigo-500/25 transition"
+            onClick={() => setShowCatalog((v) => !v)}
+            className={`inline-flex items-center gap-2 rounded-xl border px-3.5 py-2 text-xs font-semibold transition ${
+              showCatalog
+                ? "border-indigo-400 bg-indigo-500/25 text-indigo-100"
+                : "border-slate-700 bg-slate-900 text-slate-200 hover:border-indigo-500/60"
+            }`}
           >
-            <div>
-              <div className="text-[11px] font-bold text-indigo-300 uppercase tracking-wider">
-                Kho 900 Kịch bản &amp; Tùy chỉnh
-              </div>
-              <div className="text-xs font-semibold text-white mt-0.5">
-                Chọn kịch bản 2k – 60k GD / Kết hợp đa tấn công
-              </div>
-            </div>
-            <Layers className="h-4 w-4 text-indigo-300 shrink-0" />
+            <Layers className="h-3.5 w-3.5 text-indigo-400" />
+            Bộ chọn 1.125 Kịch bản &amp; Tùy chỉnh Traffic
+            {showCatalog ? (
+              <ChevronUp className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5" />
+            )}
           </button>
 
           <button
             onClick={onInvestigate}
             disabled={loadingAction !== null}
-            className="flex items-center justify-between rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-2.5 text-left hover:bg-emerald-500/25 transition disabled:opacity-50"
+            className="ml-auto inline-flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/25 transition disabled:opacity-50"
           >
-            <div>
-              <div className="text-[11px] font-bold text-emerald-300 uppercase tracking-wider">
-                Bước 2 · AI SOC Điều tra &amp; Xuất Báo cáo
-              </div>
-              <div className="text-xs font-semibold text-white mt-0.5">
-                {loadingAction === "investigate"
-                  ? "AI đang phân tích log & Dry-Run..."
-                  : "Phân tích ReAct + Dry-Run + Xuất PDF/MD"}
-              </div>
-            </div>
-            <Cpu className="h-4 w-4 text-emerald-300 shrink-0" />
+            <Cpu className="h-3.5 w-3.5 text-emerald-400" />
+            {loadingAction === "investigate"
+              ? "AI đang phân tích..."
+              : "Điều tra AI SOC & Xuất Báo cáo"}
           </button>
         </div>
       </div>
+
+      {/* Inline Collapsible Scenario Picker & Custom Traffic Builder */}
+      {showCatalog && (
+        <ScenarioCatalogExplorer
+          loadingAction={loadingAction}
+          onRunScenario={handleSelectAndRun}
+        />
+      )}
 
       {/* Empty state prompt before first simulation */}
       {!scaleResult ? (
@@ -172,16 +187,15 @@ export function AiComparisonOverview({
             <ShieldCheck className="h-6 w-6" />
           </div>
           <h3 className="text-base font-bold text-white">
-            Sẵn sàng mô phỏng hàng chục nghìn giao dịch thực tế
+            Sẵn sàng mô phỏng lưu lượng Fintech thực tế (7 kiểu tấn công lịch sử)
           </h3>
           <p className="text-xs text-slate-400 max-w-xl mx-auto leading-relaxed">
-            Bấm <strong className="text-sky-300">Chạy Ngẫu nhiên từ Kho 900 Kịch bản</strong> để hệ thống phát sinh
-            10.000 – 60.000 giao dịch trộn ngẫu nhiên nhiều kiểu tấn công cùng lúc và so sánh trực quan thiệt hại giữa{" "}
-            <strong className="text-rose-300">Không có AI</strong> và{" "}
-            <strong className="text-emerald-300">Có FinSec AI bảo vệ</strong> cho từng tài khoản ({wallets.length} ví).
+            Bấm <strong className="text-sky-300">Chạy Kịch bản Ngẫu nhiên</strong> hoặc mở{" "}
+            <strong className="text-indigo-300">Bộ chọn Kịch bản &amp; Tùy chỉnh Traffic</strong> ngay phía trên để phát sinh
+            2.000 – 100.000 giao dịch và quan sát sự khác biệt giữa 5 lớp bảo mật truyền thống và khi bổ sung FinSec AI trên {wallets.length} nhóm tài khoản.
           </p>
           <button
-            onClick={onRunRandomScenario}
+            onClick={() => handleSelectAndRun({ scenario_id: "random" })}
             disabled={loadingAction !== null}
             className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-500 px-5 py-2.5 text-xs font-bold text-white shadow-lg hover:from-sky-400 hover:to-indigo-400 transition"
           >
@@ -287,10 +301,10 @@ export function AiComparisonOverview({
                   </div>
                 </div>
                 <div className="rounded-xl border border-slate-800 bg-black/25 p-3">
-                  <div className="text-[11px] text-slate-400">Thời gian vá lỗ hổng (MTTR)</div>
+                  <div className="text-[11px] text-slate-400">Thời gian vá thủ công (Benchmark ngành)</div>
                   <div className="mt-1 font-mono text-base font-bold text-amber-300">
                     ~{Math.round((noAi?.mttr_minutes ?? 180) / 60 * 10) / 10} giờ{" "}
-                    <span className="text-[11px] font-normal text-slate-400">(thủ công)</span>
+                    <span className="text-[10px] font-normal text-slate-400">(ước lượng DORA/AppSec)</span>
                   </div>
                 </div>
               </div>
@@ -628,6 +642,15 @@ export function AiComparisonOverview({
                         />
                       )}
                     </div>
+
+                    {v.historical_case && (
+                      <div className="flex items-start gap-1.5 rounded-lg border border-indigo-500/25 bg-indigo-950/25 px-2.5 py-1.5 text-[10.5px] text-indigo-200">
+                        <History className="h-3.5 w-3.5 text-indigo-400 shrink-0 mt-0.5" />
+                        <span>
+                          <strong>Tiền lệ lịch sử:</strong> {v.historical_case}
+                        </span>
+                      </div>
+                    )}
 
                     {v.traditional_gap_reason && (
                       <p className="text-[11px] text-slate-400 leading-relaxed">

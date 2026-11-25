@@ -138,6 +138,78 @@ _KNOWLEDGE_BASE: dict[str, dict[str, Any]] = {
             "Kiểm thử tải đồng thời (10–50 concurrent requests cùng 1 ví) trong bộ test hồi quy trước khi release.",
         ],
     },
+    "AUTH_VELOCITY_GUARD": {
+        "category_vi": "Tấn công Thử mật khẩu hàng loạt & Chiếm đoạt Tài khoản (Credential Stuffing / ATO)",
+        "cwe": "CWE-307 (Improper Restriction of Excessive Authentication Attempts)",
+        "mitre_attack": "T1110.004 (Brute Force: Credential Stuffing)",
+        "cvss_estimate": "8.6 HIGH — CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+        "plain_language_analogy": (
+            "Giống như kẻ xấu mua danh sách hàng triệu chìa khóa bị lộ từ các dịch vụ khác rồi dùng máy thử nhanh lần lượt vào hàng nghìn ổ khóa nhà khách hàng ngân hàng (tương tự vụ PayPal 2022–2023)."
+        ),
+        "business_impact": (
+            "Chiếm đoạt tài khoản khách hàng (Account Takeover), rút tiền trái phép, lộ thông tin cá nhân và tăng đột biến khiếu nại gian lận."
+        ),
+        "root_cause": (
+            "Endpoint `/sandbox/auth/login` thiếu cơ chế phát hiện vận tốc đăng nhập bất thường kết hợp tín hiệu thiết bị tin cậy (`device_trusted`) và xác thực đa yếu tố bắt buộc (MFA/Passkey)."
+        ),
+        "virtual_patch_mechanism": (
+            "Áp dụng luật `AUTH_VELOCITY_GUARD` tại Middleware (<5ms): trả về HTTP 429 cho các chuỗi đăng nhập tốc độ cao từ IP lạ hoặc thiết bị chưa xác thực MFA."
+        ),
+        "remediation_checklist": [
+            "Kích hoạt ngay Virtual Patch `AUTH_VELOCITY_GUARD` để chặn các luồng botnet thử đăng nhập.",
+            "Bắt buộc xác thực đa yếu tố (Passkey / Smart OTP) khi đăng nhập từ thiết bị hoặc dải IP mới.",
+            "Tích hợp kiểm tra mật khẩu bị rò rỉ (breached credential check) và khóa tạm theo cặp `(IP, username)`.",
+            "Cảnh báo khách hàng ngay khi phát hiện đăng nhập bất thường.",
+        ],
+    },
+    "BLOCK_FORBIDDEN_FIELDS": {
+        "category_vi": "Giả mạo Tham số & Gán hàng loạt (Parameter Tampering / Mass Assignment)",
+        "cwe": "CWE-915 (Improperly Controlled Modification of Dynamically-Determined Object Attributes)",
+        "mitre_attack": "T1190 (Exploit Public-Facing Application) / T1565 (Data Manipulation)",
+        "cvss_estimate": "9.1 CRITICAL — CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:H/A:H",
+        "plain_language_analogy": (
+            "Giống như khách hàng tự viết thêm dòng 'Phí = 0₫' hoặc 'Quyền = Quản trị viên' vào tờ phiếu chuyển tiền và hệ thống tự động chấp nhận mà không lọc bỏ các ô cấm."
+        ),
+        "business_impact": (
+            "Thất thoát phí giao dịch, chuyển tiền số âm làm sai lệch số dư ví, hoặc leo thang đặc quyền trái phép lên tài khoản quản trị."
+        ),
+        "root_cause": (
+            "API `/sandbox/transfer` nhận trực tiếp toàn bộ JSON body mà không áp dụng DTO allowlist chặt chẽ và thiếu kiểm tra giá trị dương `amount > 0`."
+        ),
+        "virtual_patch_mechanism": (
+            "Áp dụng luật `BLOCK_FORBIDDEN_FIELDS` tại Middleware: chặn ngay HTTP 403 mọi request chứa trường nhạy cảm (`role`, `is_admin`, `fee_override`, `discount_pct`) hoặc `amount <= 0`."
+        ),
+        "remediation_checklist": [
+            "Kích hoạt ngay Virtual Patch `BLOCK_FORBIDDEN_FIELDS` để lọc bỏ trường giả mạo ở tầng biên.",
+            "Cấu hình Pydantic `extra='forbid'` trên toàn bộ request schema thanh toán/chuyển tiền.",
+            "Bắt buộc tính phí giao dịch và chiết khấu hoàn toàn ở phía Backend, không bao giờ tin giá trị gửi từ Client.",
+            "Bổ sung unit test gửi `amount <= 0` và các trường cấm (`role`, `is_admin`) vào CI/CD.",
+        ],
+    },
+    "BLOCK_INTERNAL_URL": {
+        "category_vi": "Giả mạo Yêu cầu Phía Máy chủ (SSRF — Tương tự vụ Capital One 2019)",
+        "cwe": "CWE-918 (Server-Side Request Forgery)",
+        "mitre_attack": "T1190 (Exploit Public-Facing Application) / T1552.005 (Cloud Instance Metadata API)",
+        "cvss_estimate": "9.8 CRITICAL — CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+        "plain_language_analogy": (
+            "Giống như đối tác nộp địa chỉ giao hàng là 'phòng máy chủ bí mật bên trong ngân hàng' (`169.254.169.254`), khiến chính nhân viên nội bộ tự vào lấy chìa khóa kho bạc mang ra ngoài."
+        ),
+        "business_impact": (
+            "Lộ thông tin xác thực Cloud (AWS/GCP IAM credentials), quét mạng nội bộ và nguy cơ rò rỉ dữ liệu khách hàng quy mô lớn như sự cố Capital One 2019."
+        ),
+        "root_cause": (
+            "Endpoint `/sandbox/webhooks/register` cho phép đối tác nhập URL callback tùy ý mà không chặn dải địa chỉ nội bộ (RFC1918, loopback `127.0.0.1`, link-local `169.254.169.254`)."
+        ),
+        "virtual_patch_mechanism": (
+            "Áp dụng luật `BLOCK_INTERNAL_URL` tại Middleware (<5ms): từ chối HTTP 403 ngay lập tức mọi URL trỏ tới `169.254.169.254`, `localhost`, `127.0.0.1`, dải IP nội bộ hoặc giao thức `file://`."
+        ),
+        "remediation_checklist": [
+            "Kích hoạt ngay Virtual Patch `BLOCK_INTERNAL_URL` để chặn truy cập Cloud Metadata & IP nội bộ.",
+            "Chuyển toàn bộ Cloud VM sang IMDSv2 (bắt buộc token session) và giới hạn quyền IAM theo nguyên tắc tối thiểu.",
+            "Phân giải DNS trước khi gửi outbound request và chặn toàn bộ IP thuộc private/loopback/link-local CIDR.",
+            "Định tuyến outbound webhook qua Egress Proxy tách biệt khỏi VPC chứa dữ liệu lõi.",
+        ],
+    },
 }
 
 
@@ -159,6 +231,12 @@ def _detect_condition_type(incident: dict[str, Any]) -> str:
         return "IP_WHITELIST_FOR_KEY"
     if "race" in combined or "toctou" in combined or "withdraw" in combined:
         return "CONCURRENCY_LOCK"
+    if "stuffing" in combined or "ato" in combined or "login" in combined:
+        return "AUTH_VELOCITY_GUARD"
+    if "tamper" in combined or "mass assignment" in combined or "transfer" in combined:
+        return "BLOCK_FORBIDDEN_FIELDS"
+    if "ssrf" in combined or "169.254" in combined or "metadata" in combined:
+        return "BLOCK_INTERNAL_URL"
     return "ENFORCE_OWNER_MATCH"
 
 

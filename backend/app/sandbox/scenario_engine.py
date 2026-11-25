@@ -134,10 +134,50 @@ ATTACK_COMPOSITIONS: list[dict[str, Any]] = [
         "severity": "CRITICAL",
     },
     {
+        "code": "CRED_STUFF_ONLY",
+        "title": "Credential Stuffing / Chiếm tài khoản ATO (Kiểu PayPal 2022–2023)",
+        "category": "single_vector",
+        "vectors": ["credential_stuffing"],
+        "with_prompt_injection": False,
+        "severity": "HIGH",
+    },
+    {
+        "code": "PARAM_TAMPER_ONLY",
+        "title": "Parameter Tampering / Mass Assignment (Sửa phí & quyền JSON)",
+        "category": "single_vector",
+        "vectors": ["parameter_tampering"],
+        "with_prompt_injection": False,
+        "severity": "CRITICAL",
+    },
+    {
+        "code": "SSRF_IMDS_ONLY",
+        "title": "SSRF Quét Cloud Metadata 169.254.169.254 (Kiểu Capital One 2019)",
+        "category": "single_vector",
+        "vectors": ["ssrf_callback"],
+        "with_prompt_injection": False,
+        "severity": "CRITICAL",
+    },
+    {
+        "code": "FINTECH_HISTORY_COMBO",
+        "title": "Đa mũi Lịch sử: Credential Stuffing + Parameter Tampering + SSRF",
+        "category": "multi_vector",
+        "vectors": ["credential_stuffing", "parameter_tampering", "ssrf_callback"],
+        "with_prompt_injection": True,
+        "severity": "CRITICAL",
+    },
+    {
         "code": "FULL_RED_TEAM",
-        "title": "Chiến dịch Toàn diện 5 Mũi (4 Vector + Prompt Injection)",
+        "title": "Chiến dịch Toàn diện 7 Vector Lịch sử + Prompt Injection",
         "category": "red_team_blitz",
-        "vectors": ["webhook_replay", "bola_idor", "leaked_key", "race_condition"],
+        "vectors": [
+            "webhook_replay",
+            "bola_idor",
+            "leaked_key",
+            "race_condition",
+            "credential_stuffing",
+            "parameter_tampering",
+            "ssrf_callback",
+        ],
         "with_prompt_injection": True,
         "severity": "CRITICAL",
     },
@@ -197,8 +237,48 @@ VECTOR_META: dict[str, dict[str, Any]] = {
         "avg_loss_per_hit_vnd": 2_200_000,
         "block_http_code": 429,
         "traditional_block_range": (0.68, 0.80),
+        "historical_case": "Sự cố Double-Spending rút tiền song song tại nhiều ví điện tử & sàn crypto (2021–2024)",
         "traditional_gap_reason": (
             "Rate Limit, Fraud Rule cơ bản & kiểm tra số dư ứng dụng chặn được ~74%, nhưng vẫn lọt cửa sổ tranh chấp dưới 100ms (TOCTOU) khi nhiều request bắn đồng thời vượt qua khe hở lock."
+        ),
+    },
+    "credential_stuffing": {
+        "label": "Credential Stuffing / Chiếm đoạt Tài khoản (ATO)",
+        "owasp": "API2:2023",
+        "condition_type": "AUTH_VELOCITY_GUARD",
+        "endpoint": "/sandbox/auth/login",
+        "avg_loss_per_hit_vnd": 650_000,
+        "block_http_code": 429,
+        "traditional_block_range": (0.68, 0.80),
+        "historical_case": "Vụ PayPal Credential Stuffing (12/2022 – 01/2023) chiếm quyền hơn 35.000 tài khoản từ mật khẩu rò rỉ",
+        "traditional_gap_reason": (
+            "Rate Limit theo IP & CAPTCHA cơ bản chặn ~74% bot thô, nhưng vẫn lọt mạng botnet xoay vòng IP dân cư (residential proxy) thử đăng nhập tốc độ thấp trên từng tài khoản."
+        ),
+    },
+    "parameter_tampering": {
+        "label": "Parameter Tampering / Mass Assignment (Sửa phí & số tiền)",
+        "owasp": "API3:2023",
+        "condition_type": "BLOCK_FORBIDDEN_FIELDS",
+        "endpoint": "/sandbox/transfer",
+        "avg_loss_per_hit_vnd": 1_850_000,
+        "block_http_code": 403,
+        "traditional_block_range": (0.64, 0.76),
+        "historical_case": "Lỗ hổng Mass Assignment / Sửa trường fee=0, amount âm trên cổng thanh toán & thương mại điện tử",
+        "traditional_gap_reason": (
+            "WAF & JSON Schema cơ bản chỉ kiểm tra cú pháp JSON hợp lệ (~70% chặn payload dị), nhưng bỏ lọt các trường ẩn (fee_override, role, is_admin) bị bind thẳng vào model backend."
+        ),
+    },
+    "ssrf_callback": {
+        "label": "SSRF Quét Cloud Metadata (Kiểu Capital One 2019)",
+        "owasp": "API7:2023",
+        "condition_type": "BLOCK_INTERNAL_URL",
+        "endpoint": "/sandbox/webhooks/register",
+        "avg_loss_per_hit_vnd": 2_400_000,
+        "block_http_code": 403,
+        "traditional_block_range": (0.66, 0.78),
+        "historical_case": "Vụ rò rỉ Capital One (2019): SSRF vào AWS IMDS 169.254.169.254 đánh cắp IAM key & 100 triệu hồ sơ khách hàng",
+        "traditional_gap_reason": (
+            "Firewall mạng & WAF cơ bản chặn ~72% chuỗi tấn công phổ biến, nhưng lọt URL đăng ký webhook đối tác trỏ ngầm vào IP nội bộ (169.254.169.254 / 10.x / localhost) từ chính máy chủ backend."
         ),
     },
 }
@@ -346,6 +426,42 @@ RECOMMENDED_AI_SHIELD_RULES: list[dict[str, Any]] = [
             "params": {"lock_key": "actor_id", "window_seconds": 2.0},
             "action": "BLOCK_429",
             "reason": "Blocked by FinSec AI Shield: Concurrent withdrawal race condition (TOCTOU)",
+        },
+    },
+    {
+        "id": "RULE-SHIELD-ATO",
+        "name": "AI Shield: Auth Velocity & Untrusted Device Guard (Anti-ATO)",
+        "rule_spec": {
+            "target_path_prefix": "/sandbox/auth/login",
+            "condition_type": "AUTH_VELOCITY_GUARD",
+            "params": {"window_seconds": 5.0, "block_ips": ["91.214.124.55"]},
+            "action": "BLOCK_429",
+            "reason": "Blocked by FinSec AI Shield: Credential stuffing / ATO velocity anomaly",
+        },
+    },
+    {
+        "id": "RULE-SHIELD-TAMPER",
+        "name": "AI Shield: Block Forbidden Mass-Assignment Fields",
+        "rule_spec": {
+            "target_path_prefix": "/sandbox/transfer",
+            "condition_type": "BLOCK_FORBIDDEN_FIELDS",
+            "params": {
+                "forbidden_fields": ["role", "is_admin", "fee_override", "discount_pct", "is_verified"],
+                "reject_non_positive_amount": True,
+            },
+            "action": "BLOCK_403",
+            "reason": "Blocked by FinSec AI Shield: Parameter tampering / Mass Assignment attempt",
+        },
+    },
+    {
+        "id": "RULE-SHIELD-SSRF",
+        "name": "AI Shield: Block Internal/IMDS Callback URLs (Anti-SSRF)",
+        "rule_spec": {
+            "target_path_prefix": "/sandbox/webhooks/register",
+            "condition_type": "BLOCK_INTERNAL_URL",
+            "params": {"url_field": "callback_url"},
+            "action": "BLOCK_403",
+            "reason": "Blocked by FinSec AI Shield: SSRF attempt targeting internal/cloud metadata host",
         },
     },
 ]
@@ -680,15 +796,15 @@ def run_scale_simulation(
                 if not is_covered_live:
                     acc["with_ai_live_balance"] += w_loss
                     acc["with_ai_live_delta"] += w_loss
-            elif vec == "race_condition":
-                # Overdraft / drained balance
+            elif vec in ("race_condition", "parameter_tampering"):
+                # Overdraft / drained balance (Race Condition or Parameter Tampering fee/amount manipulation)
                 acc["without_ai_balance"] -= w_loss
                 acc["without_ai_delta"] -= w_loss
                 if not is_covered_live:
                     acc["with_ai_live_balance"] -= w_loss
                     acc["with_ai_live_delta"] -= w_loss
             else:
-                # Data leak (BOLA or Leaked Key) — distinct per-account leaked records
+                # Data leak / Account Takeover (BOLA, Leaked Key, Credential Stuffing, SSRF)
                 acc["without_ai_records_leaked"] += w_hits
                 total_records_leaked_without_ai += w_hits
                 if not is_covered_live:
@@ -714,6 +830,7 @@ def run_scale_simulation(
                 "loss_prevented_full_vnd": loss_without_ai,
                 "rule_currently_active": is_covered_live,
                 "block_http_code": meta["block_http_code"],
+                "historical_case": meta.get("historical_case", ""),
                 "traditional_gap_reason": meta["traditional_gap_reason"],
             }
         )
@@ -806,6 +923,64 @@ def run_scale_simulation(
                             "actor_id": None,
                             "api_key_id": "internal_settlement_key_prod",
                             "request_body": {},
+                            "is_clean_baseline": False,
+                            "created_at": now_iso,
+                        }
+                    )
+                elif vec == "credential_stuffing":
+                    sample_rows.append(
+                        {
+                            "method": "POST",
+                            "path": "/sandbox/auth/login",
+                            "status_code": code,
+                            "ip_address": "91.214.124.55",
+                            "user_agent": pi_ua if j == 0 else "python-requests/2.31",
+                            "actor_id": "usr_an" if j % 2 == 0 else "usr_binh",
+                            "api_key_id": None,
+                            "request_body": {
+                                "username": "usr_an" if j % 2 == 0 else "usr_binh",
+                                "mfa_verified": False,
+                                "device_trusted": False,
+                            },
+                            "is_clean_baseline": False,
+                            "created_at": now_iso,
+                        }
+                    )
+                elif vec == "parameter_tampering":
+                    sample_rows.append(
+                        {
+                            "method": "POST",
+                            "path": "/sandbox/transfer",
+                            "status_code": code,
+                            "ip_address": "103.88.14.91",
+                            "user_agent": pi_ua if j == 0 else "BurpSuite-Repeater/2024",
+                            "actor_id": "usr_dung",
+                            "api_key_id": None,
+                            "request_body": {
+                                "from_wallet": "W_1004",
+                                "to_wallet": "W_1001",
+                                "amount": -500_000,
+                                "fee_override": 0,
+                                "role": "admin",
+                            },
+                            "is_clean_baseline": False,
+                            "created_at": now_iso,
+                        }
+                    )
+                elif vec == "ssrf_callback":
+                    sample_rows.append(
+                        {
+                            "method": "POST",
+                            "path": "/sandbox/webhooks/register",
+                            "status_code": code,
+                            "ip_address": "45.134.26.19",
+                            "user_agent": pi_ua if j == 0 else "curl/8.4.0",
+                            "actor_id": "usr_chi",
+                            "api_key_id": None,
+                            "request_body": {
+                                "callback_url": "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+                                "events": ["payment.success"],
+                            },
                             "is_clean_baseline": False,
                             "created_at": now_iso,
                         }

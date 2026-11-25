@@ -33,6 +33,9 @@ const ALL_VECTORS = [
   { id: "bola_idor", label: "BOLA / IDOR" },
   { id: "leaked_key", label: "Lộ Internal Key" },
   { id: "race_condition", label: "Race Condition" },
+  { id: "credential_stuffing", label: "Credential Stuffing (ATO)" },
+  { id: "parameter_tampering", label: "Parameter Tampering" },
+  { id: "ssrf_callback", label: "SSRF (Capital One)" },
 ];
 
 export function ScenarioCatalogExplorer({
@@ -285,11 +288,14 @@ export function ScenarioCatalogExplorer({
             }}
             className="rounded-xl border border-slate-700 bg-[#070b14] px-3 py-2 text-xs text-slate-200 focus:border-sky-500 focus:outline-none"
           >
-            <option value="">Tất cả mũi tấn công</option>
+            <option value="">Tất cả 7 mũi tấn công lịch sử</option>
             <option value="webhook_replay">Webhook Replay</option>
             <option value="bola_idor">BOLA / IDOR</option>
             <option value="leaked_key">Lộ Internal Key</option>
-            <option value="race_condition">Race Condition</option>
+            <option value="race_condition">Race Condition (TOCTOU)</option>
+            <option value="credential_stuffing">Credential Stuffing / ATO (PayPal)</option>
+            <option value="parameter_tampering">Parameter Tampering / Mass Assignment</option>
+            <option value="ssrf_callback">SSRF Cloud Metadata (Capital One)</option>
             <option value="prompt_injection">Kèm Prompt Injection</option>
           </select>
         </div>
