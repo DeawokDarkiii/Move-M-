@@ -154,7 +154,7 @@ def validate_rule_spec(rule_spec: dict[str, Any]) -> RuleSpec:
 # Core Unified Rule Evaluator (used by BOTH Live Middleware & Dry-Run)
 # ------------------------------------------------------------------
 def evaluate_rule(
-    rule_spec: dict[str, Any],
+    rule_spec: dict[str, Any] | RuleSpec,
     req_context: dict[str, Any],
     *,
     state: Optional[dict[str, Any]] = None,
@@ -172,10 +172,13 @@ def evaluate_rule(
       - request_body: dict
       - created_at: Optional[str | float]
     """
-    try:
-        spec = validate_rule_spec(rule_spec)
-    except Exception:
-        return False
+    if isinstance(rule_spec, RuleSpec):
+        spec = rule_spec
+    else:
+        try:
+            spec = validate_rule_spec(rule_spec)
+        except Exception:
+            return False
 
     path = str(req_context.get("path") or "")
     if not path.startswith(spec.target_path_prefix):

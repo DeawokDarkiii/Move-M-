@@ -23,6 +23,7 @@ from typing import Any, Optional
 
 from app.db import db
 from app.policy.engine import get_active_rules_cached
+from app.sandbox.event_replay import run_real_event_replay
 
 # 15 realistic Vietnamese fintech operational contexts with real operational physics
 OPERATIONAL_CONTEXTS: list[dict[str, Any]] = [
@@ -852,7 +853,20 @@ def run_scale_simulation(
     mttr_mult = float(ctx_obj.get("mttr_multiplier", 1.0))
     tps = round(tx_count / (SIMULATION_WINDOW_MINUTES * 60), 1)
 
-    # Simulate per-vector & per-account impact
+    # Execute ALL clean + attack events directly through 5-layer traditional checks & REAL FinSec AI evaluate_rule()
+    replay = run_real_event_replay(
+        clean_transactions=clean_transactions,
+        vector_counts=vector_counts,
+        target_wallet_ids=target_wallet_ids,
+        wallets=wallets,
+        live_rules=live_rules,
+        full_shield_rules=RECOMMENDED_AI_SHIELD_RULES,
+        pi_enabled=pi_enabled,
+        window_minutes=SIMULATION_WINDOW_MINUTES,
+        rng=rng,
+    )
+
+    # Aggregate real measured per-vector & per-account impact from event_replay
     vector_breakdown: list[dict[str, Any]] = []
     total_loss_without_ai = 0
     total_loss_with_ai_live = 0
@@ -870,46 +884,34 @@ def run_scale_simulation(
         meta = VECTOR_META[vec]
         ctype = meta["condition_type"]
         is_covered_live = ctype in active_condition_types
+        vres = replay["vector_results"][vec]
 
-        # Realistic Traditional 5-Layer Bank Security (blocks ~64%-82%)
-        trad_min, trad_max = meta["traditional_block_range"]
-        blocked_by_traditional = max(1, int(round(attempts * rng.uniform(trad_min, trad_max))))
-        blocked_by_traditional = min(blocked_by_traditional, max(0, attempts - 1))
-        succeeded_without_ai = max(1, attempts - blocked_by_traditional)
-
-        # Realistic Enterprise AI Shield (98.5% – 99.8% total block rate, NOT rigid 100% perfectionism):
-        # Leaves a tiny residual (0.2% – 1.5% of total attempts) for SOC L2/L3 escalation on novel evasions.
-        residual_edge_cases = (
-            max(1, int(round(attempts * rng.uniform(0.003, 0.013))))
-            if attempts >= 40
-            else 0
-        )
-        residual_edge_cases = min(residual_edge_cases, max(0, succeeded_without_ai - 1))
-
-        ai_extra_full = max(0, succeeded_without_ai - residual_edge_cases)
-        blocked_full = blocked_by_traditional + ai_extra_full
-        leaked_full = residual_edge_cases
-
-        ai_extra_live = ai_extra_full if is_covered_live else 0
+        blocked_by_traditional = vres["blocked_by_traditional"]
+        succeeded_without_ai = vres["succeeded_without_ai"]
+        ai_extra_live = vres["ai_extra_live"]
+        ai_extra_full = vres["ai_extra_full"]
+        leaked_live = vres["leaked_live"]
+        leaked_full = vres["leaked_full"]
         blocked_live = blocked_by_traditional + ai_extra_live
-        leaked_live = leaked_full if is_covered_live else succeeded_without_ai
+        blocked_full = blocked_by_traditional + ai_extra_full
 
         # Compute financial loss scaled by operational context avg_tx_multiplier (e.g., VIP x3.2, BILL_PAY x0.4)
         if vec == "webhook_replay":
-            effective_credits = max(2, succeeded_without_ai // 12)
-            base_loss = effective_credits * rng.randint(1_200_000, 2_500_000)
+            effective_credits = max(1, succeeded_without_ai // 10)
+            base_loss = effective_credits * 1_800_000
         elif vec == "race_condition":
-            effective_drains = max(2, succeeded_without_ai // 14)
-            base_loss = effective_drains * rng.randint(1_500_000, 3_000_000)
+            effective_drains = max(1, succeeded_without_ai // 12)
+            base_loss = effective_drains * 2_200_000
         elif vec == "leaked_key":
-            base_loss = max(1, succeeded_without_ai // 20) * meta["avg_loss_per_hit_vnd"]
+            base_loss = max(1, succeeded_without_ai // 18) * meta["avg_loss_per_hit_vnd"]
         else:
-            base_loss = max(1, succeeded_without_ai // 25) * meta["avg_loss_per_hit_vnd"]
+            base_loss = max(1, succeeded_without_ai // 20) * meta["avg_loss_per_hit_vnd"]
 
-        loss_without_ai = int(round(base_loss * avg_tx_mult / 10_000) * 10_000)
-        residual_ratio = (leaked_full / succeeded_without_ai) if succeeded_without_ai else 0.0
-        loss_full = int(round((loss_without_ai * residual_ratio) / 10_000) * 10_000)
-        loss_live = loss_full if is_covered_live else loss_without_ai
+        loss_without_ai = int(round(base_loss * avg_tx_mult / 10_000) * 10_000) if succeeded_without_ai > 0 else 0
+        full_leak_ratio = (leaked_full / succeeded_without_ai) if succeeded_without_ai else 0.0
+        live_leak_ratio = (leaked_live / succeeded_without_ai) if succeeded_without_ai else 0.0
+        loss_full = int(round((loss_without_ai * full_leak_ratio) / 10_000) * 10_000)
+        loss_live = int(round((loss_without_ai * live_leak_ratio) / 10_000) * 10_000)
 
         total_loss_without_ai += loss_without_ai
         total_loss_with_ai_live += loss_live
@@ -1190,44 +1192,25 @@ def run_scale_simulation(
         else 0.0
     )
 
-    # Traditional 5-layer static bank security breakdown
-    layer_weights = [0.24, 0.22, 0.21, 0.19, 0.14]
-    layer_names = [
-        "WAF & API Schema",
-        "Rate Limit & IP Intel",
-        "IAM / JWT & RBAC",
-        "App & DB Guard tĩnh",
-        "SIEM Rule & SOC L1",
-    ]
-    traditional_layers: list[dict[str, Any]] = []
-    rem_trad = total_blocked_traditional
-    for idx_l, (lname, lw) in enumerate(zip(layer_names, layer_weights)):
-        if idx_l == len(layer_names) - 1:
-            cnt_l = max(0, rem_trad)
-        else:
-            cnt_l = max(0, int(round(total_blocked_traditional * lw * rng.uniform(0.85, 1.15))))
-            cnt_l = min(cnt_l, rem_trad)
-            rem_trad -= cnt_l
-        traditional_layers.append({"layer": lname, "blocked": cnt_l})
-
-    # Rigid static WAF / aggressive IP rate-limit blocks ~0.35% - 1.05% of legitimate customers at peak load
-    trad_fp_count = max(1, int(round(clean_transactions * rng.uniform(0.0035, 0.0105))))
+    # Real measured 5-layer traditional counts & false positives from event_replay (ZERO hardcoded percentages!)
+    traditional_layers = replay["traditional_layers"]
+    trad_fp_count = int(replay["trad_fp_count"])
     trad_fp_rate = round((trad_fp_count / clean_transactions) * 100.0, 2) if clean_transactions else 0.0
-    # MTTR scaled by operational context (e.g., NIGHT_SHIFT x1.55 because L2/L3 engineers are on-call)
-    trad_mttr_minutes = int(round(rng.randint(90, 190) * mttr_mult))
+    trad_mttr_minutes = int(round(135 * mttr_mult))
 
-    # Realistic controlled AI False Positive rate (0.00% – 0.04%):
-    # At peak/surge/mega scale with CONCURRENCY_LOCK, a tiny fraction of bursty Payout Agent (W_1004)
-    # or flaky-network auto-retry requests may receive a soft HTTP 429 retry challenge.
-    has_race_rule_live = "CONCURRENCY_LOCK" in active_condition_types
-    ai_full_fp_count = (
-        max(1, int(round(clean_transactions * rng.uniform(0.0001, 0.00035))))
-        if (tx_count >= 15000 and "race_condition" in active_vectors)
-        else 0
-    )
+    # Real measured FinSec AI False Positives from running evaluate_rule() on every clean event!
+    ai_full_fp_count = int(replay["ai_full_fp_count"])
     ai_full_fp_rate = round((ai_full_fp_count / clean_transactions) * 100.0, 3) if clean_transactions else 0.0
-    ai_live_fp_count = ai_full_fp_count if (has_race_rule_live and live_rules) else (trad_fp_count if not live_rules else 0)
+    ai_live_fp_count = int(replay["ai_live_fp_count"])
     ai_live_fp_rate = round((ai_live_fp_count / clean_transactions) * 100.0, 3) if clean_transactions else 0.0
+
+    # Expose real concrete log samples measured by evaluate_rule()
+    ai_evasion_samples = (
+        replay["ai_live_evasion_samples"] if live_rules else replay["ai_full_evasion_samples"]
+    )
+    ai_false_positive_samples = (
+        replay["ai_live_fp_samples"] if live_rules else replay["ai_full_fp_samples"]
+    )
 
     # Logical Kill Chain ordering across active vectors
     kill_chain_stages: list[dict[str, str]] = []
@@ -1236,7 +1219,7 @@ def run_scale_simulation(
     if recon_vecs:
         kill_chain_stages.append(
             {
-                "phase": "1. Reconnaissance & Initial Access",
+                "phase": "Reconnaissance & Initial Access",
                 "detail": f"Dò tìm ví mục tiêu / tài nguyên nội bộ ({', '.join(recon_vecs)})",
             }
         )
@@ -1255,12 +1238,16 @@ def run_scale_simulation(
             }
         )
 
+    measured_leaked = sum(v["leaked_live"] for v in vector_breakdown) if live_rules else total_leaked_full
+    measured_fp = ai_live_fp_count if live_rules else ai_full_fp_count
+    measured_fp_rate = ai_live_fp_rate if live_rules else ai_full_fp_rate
     ai_residual_note = (
-        f"Có kiểm soát sai số thực tế: {total_leaked_full} request biến thể hiếm được chuyển SOC L2/L3 review"
+        f"Đo trực tiếp từ Policy Engine (evaluate_rule trên {tx_count:,} events): "
+        f"{measured_leaked} biến thể vượt luật tĩnh được chuyển SOC L2/L3"
         + (
-            f"; {ai_full_fp_count} giao dịch retry liên tiếp (Đại lý W_1004 / mạng chập chờn) nhận soft-challenge HTTP 429 ({ai_full_fp_rate}%)."
-            if ai_full_fp_count > 0
-            else "; 0 chặn nhầm khách hàng hợp lệ."
+            f"; {measured_fp} giao dịch rút/chi hộ liên tiếp <2s bị CONCURRENCY_LOCK gắn soft-challenge ({measured_fp_rate}%)."
+            if measured_fp > 0
+            else "; 0 giao dịch khách hàng hợp lệ bị chặn nhầm."
         )
     )
 
@@ -1280,7 +1267,7 @@ def run_scale_simulation(
             "vectors": active_vectors,
             "with_prompt_injection": pi_enabled,
         },
-        "simulation_mode": "statistical_ab_with_live_db_sample",
+        "simulation_mode": "real_policy_engine_event_replay",
         "simulation_time_ms": elapsed_ms,
         "window_minutes": SIMULATION_WINDOW_MINUTES,
         "tps": tps,
@@ -1290,6 +1277,8 @@ def run_scale_simulation(
         },
         "kill_chain_stages": kill_chain_stages,
         "ai_residual_note": ai_residual_note,
+        "ai_evasion_samples": ai_evasion_samples,
+        "ai_false_positive_samples": ai_false_positive_samples,
         "total_transactions": tx_count,
         "clean_transactions": clean_transactions,
         "attack_transactions": total_attacks,

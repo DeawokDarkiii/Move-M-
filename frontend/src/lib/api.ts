@@ -407,6 +407,24 @@ export interface ScaleSimulationResponse {
   };
   kill_chain_stages?: Array<{ phase: string; detail: string }>;
   ai_residual_note?: string;
+  ai_evasion_samples?: Array<{
+    vector: string;
+    method: string;
+    path: string;
+    ip_address: string;
+    actor_id: string;
+    payload_preview?: Record<string, unknown>;
+    reason: string;
+  }>;
+  ai_false_positive_samples?: Array<{
+    rule_id: string;
+    condition_type: string;
+    method: string;
+    path: string;
+    actor_id: string;
+    ip_address: string;
+    detail: string;
+  }>;
   total_transactions: number;
   clean_transactions: number;
   attack_transactions: number;

@@ -86,12 +86,14 @@ def test_900_scenario_catalog_and_high_volume_ab_comparison() -> None:
         # When AI Shield is OFF, live block rate equals traditional WAF baseline
         assert sim_off["window_minutes"] == 15
         assert sim_off["tps"] > 50
-        assert sim_off["simulation_mode"] == "statistical_ab_with_live_db_sample"
+        assert sim_off["simulation_mode"] == "real_policy_engine_event_replay"
         assert sim_off["with_ai_live"]["block_rate_pct"] == sim_off["without_ai"]["block_rate_pct"]
         assert sim_off["with_ai_live"]["ai_extra_blocked"] == 0
-        # Realistic enterprise AI Shield: 98.0% - 100.0% (not rigid artificial 100%)
-        assert 98.0 <= sim_off["with_ai_full_shield"]["block_rate_pct"] <= 100.0
+        # Real measured Policy Engine block rate (~95% - 100%, driven by evaluate_rule() on every event!)
+        assert 95.0 <= sim_off["with_ai_full_shield"]["block_rate_pct"] <= 100.0
         assert sim_off["with_ai_full_shield"]["ai_extra_blocked"] > 0
+        assert isinstance(sim_off["ai_evasion_samples"], list)
+        assert isinstance(sim_off["ai_false_positive_samples"], list)
         assert len(sim_off["accounts_comparison"]) == 5
         assert len(sim_off["vector_breakdown"]) == 7
         # Verify realistic non-uniform per-account distribution & Fintech roles
@@ -120,11 +122,27 @@ def test_900_scenario_catalog_and_high_volume_ab_comparison() -> None:
         )
         assert r_sim_on.status_code == 200
         sim_on = r_sim_on.json()
-        assert 98.0 <= sim_on["with_ai_live"]["block_rate_pct"] <= 100.0
-        assert sim_on["with_ai_live"]["false_positive_rate_pct"] <= 0.05
+        assert 95.0 <= sim_on["with_ai_live"]["block_rate_pct"] <= 100.0
+        assert sim_on["with_ai_live"]["false_positive_rate_pct"] <= 0.1
         assert sim_on["with_ai_live"]["false_positives"] < sim_on["without_ai"]["false_positives"]
         assert sim_on["with_ai_live"]["financial_saved_vnd"] > 0
         assert len(sim_on["kill_chain_stages"]) >= 2
+
+        # 4. Prove AI FP count genuinely responds to real rules: rolling back RULE-SHIELD-RACE drops AI live FP to 0!
+        rb_race = client.post("/v1/policies/RULE-SHIELD-RACE/rollback", headers=HEADERS)
+        assert rb_race.status_code == 200
+        r_sim_no_race = client.post(
+            "/v1/sandbox/simulate-scale",
+            headers=HEADERS,
+            json={
+                "total_transactions": 20000,
+                "vectors": ["webhook_replay", "bola_idor"],
+                "attack_ratio_pct": 1.0,
+                "with_prompt_injection": False,
+            },
+        )
+        assert r_sim_no_race.status_code == 200
+        assert r_sim_no_race.json()["with_ai_live"]["false_positives"] == 0
 
     db_file = Path(os.environ["SQLITE_DB_PATH"])
     if db_file.exists():

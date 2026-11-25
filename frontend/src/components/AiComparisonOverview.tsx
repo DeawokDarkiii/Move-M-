@@ -217,8 +217,8 @@ export function AiComparisonOverview({
                   <span className="text-sm font-bold text-white">
                     {scaleResult.scenario.name}
                   </span>
-                  <span className="rounded-full bg-slate-800 border border-slate-700 px-2 py-0.5 font-mono text-[10px] text-slate-300">
-                    Statistical A/B Simulation + Live DB Sample
+                  <span className="rounded-full bg-emerald-500/15 border border-emerald-500/40 px-2 py-0.5 font-mono text-[10px] text-emerald-300">
+                    Real Policy Engine Replay · {scaleResult.simulation_time_ms}ms
                   </span>
                 </div>
                 <div className="text-xs text-slate-400">
@@ -459,12 +459,90 @@ export function AiComparisonOverview({
               </div>
               {scaleResult.ai_residual_note && (
                 <div className="rounded-lg border border-slate-700/80 bg-black/25 px-3 py-2 text-[11px] text-slate-300">
-                  <strong className="text-sky-300">Minh bạch sai số vận hành:</strong>{" "}
+                  <strong className="text-sky-300">Đo thật từ Policy Engine:</strong>{" "}
                   {scaleResult.ai_residual_note}
                 </div>
               )}
             </div>
           </div>
+
+          {/* REAL MEASURED ENGINE EVIDENCE: EVADED ATTACK PAYLOADS & SOFT-CHALLENGE FALSE POSITIVES */}
+          {((scaleResult.ai_evasion_samples && scaleResult.ai_evasion_samples.length > 0) ||
+            (scaleResult.ai_false_positive_samples &&
+              scaleResult.ai_false_positive_samples.length > 0)) && (
+            <div className="rounded-2xl border border-slate-800 bg-[#0d1424]/95 p-4 shadow-xl space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-bold text-white">
+                  Bằng chứng Thực thi Thật từ Policy Engine (Mẫu lọt qua &amp; Mẫu Soft-Challenge)
+                </h3>
+                <span className="text-[11px] text-slate-400">
+                  Mỗi mẫu bên dưới là kết quả chạy thật của hàm <code>evaluate_rule()</code> — không phải số ngẫu nhiên
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 text-xs">
+                {/* Evasion samples */}
+                <div className="rounded-xl border border-rose-500/30 bg-[#070b14] p-3 space-y-2">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-rose-300">
+                    Biến thể tấn công vượt luật tĩnh ({scaleResult.ai_evasion_samples?.length ?? 0} mẫu chuyển SOC L2/L3)
+                  </div>
+                  {!scaleResult.ai_evasion_samples?.length ? (
+                    <p className="text-[11px] text-slate-500">Không có mẫu biến thể lọt qua trong đợt chạy này.</p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                      {scaleResult.ai_evasion_samples.map((ev, idx) => (
+                        <div
+                          key={idx}
+                          className="rounded-lg border border-slate-800 bg-slate-950/90 p-2 space-y-1"
+                        >
+                          <div className="flex items-center justify-between gap-2 font-mono text-[10.5px]">
+                            <span className="text-rose-300 font-bold">
+                              {ev.method} {ev.path}
+                            </span>
+                            <span className="text-slate-400">
+                              IP: {ev.ip_address} · {ev.actor_id}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-300">{ev.reason}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Real AI False Positive / Soft-Challenge samples */}
+                <div className="rounded-xl border border-amber-500/30 bg-[#070b14] p-3 space-y-2">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-amber-300">
+                    Giao dịch sạch bị gắn Soft-Challenge ({scaleResult.ai_false_positive_samples?.length ?? 0} mẫu đo thật)
+                  </div>
+                  {!scaleResult.ai_false_positive_samples?.length ? (
+                    <p className="text-[11px] text-emerald-400/90">
+                      0 giao dịch sạch bị chặn nhầm bởi các luật AI đang chạy.
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                      {scaleResult.ai_false_positive_samples.map((fp, idx) => (
+                        <div
+                          key={idx}
+                          className="rounded-lg border border-slate-800 bg-slate-950/90 p-2 space-y-1"
+                        >
+                          <div className="flex items-center justify-between gap-2 font-mono text-[10.5px]">
+                            <span className="text-amber-300 font-bold">
+                              {fp.condition_type} ({fp.rule_id})
+                            </span>
+                            <span className="text-slate-400">
+                              {fp.method} {fp.path} · {fp.actor_id}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-300">{fp.detail}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* PER-ACCOUNT IMPACT TABLE (CRYSTAL CLEAR ACCOUNT-BY-ACCOUNT COMPARISON) */}
           <div className="rounded-2xl border border-slate-800 bg-[#0d1424]/95 p-4 shadow-xl space-y-3">
